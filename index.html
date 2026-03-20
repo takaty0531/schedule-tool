@@ -6,23 +6,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ForClass</title>
     <script>
-      // GitHub Pages SPA: 404.html から渡されたパスを復元
-      (function() {
-        var redirect = window.location.search.slice(1);
-        if (redirect.startsWith('p=')) {
-          var params = redirect.split('&');
-          var path = '';
-          var query = '';
-          params.forEach(function(p) {
-            if (p.startsWith('p=')) path = p.slice(2).replace(/~and~/g, '&');
-            else if (p.startsWith('q=')) query = '?' + p.slice(2).replace(/~and~/g, '&');
+      // GitHub Pages SPA: 404.html から渡されたパスを復元 (spa-github-pages方式)
+      (function(l) {
+        if (l.search[1] === '/') {
+          var decoded = l.search.slice(1).split('&').map(function(s) {
+            return s.replace(/~and~/g, '&');
           });
-          window.history.replaceState(
-            null, null,
-            window.location.pathname + (path ? '/' + path : '') + query + window.location.hash
+          window.history.replaceState(null, null,
+            l.pathname.slice(0, -1) + decoded[0] +
+            (decoded[1] ? '?' + decoded[1].slice(1) : '') +
+            l.hash
           );
         }
-      })();
+      }(window.location));
     </script>
   </head>
   <body>
