@@ -15,6 +15,8 @@ type Props = {
   members: (RoomMember & { profile: Profile })[]
 }
 
+type ViewMode = 'input' | 'erase' | 'view'
+
 // 授業確定モーダル
 function LessonConfirmModal({
   weekKey, dayIndex, slotStart, lessonMinutes, isConfirming, onConfirm, onClose,
@@ -56,12 +58,17 @@ export default function ScheduleTab({ room, members }: Props) {
   const queryClient = useQueryClient()
   const [weekKey, setWeekKey] = useState(() => getWeekKey(getThisMonday()))
   const [confirmingSlot, setConfirmingSlot] = useState<{ dayIndex: number; slotStart: number } | null>(null)
+  const [viewMode, setViewMode] = useState<ViewMode>('input')
   // ローカルの選択状態: `${dayIndex}-${slotStart}` のSet
   const [localMySlots, setLocalMySlots] = useState<Set<string>>(new Set())
+  // 確定済み授業一覧表示
+  const [showLessons, setShowLessons] = useState(false)
 
   const isInstructor = user?.id === room.instructor_id
   const thisWeekKey = getWeekKey(getThisMonday())
   const learnerIds = members.map(m => m.learner_id)
+  // 全員のIDセット（講師 + 全生徒）
+  const allPersonIds = useMemo(() => new Set([room.instructor_id, ...learnerIds]), [room.instructor_id, learnerIds])
 
   // 今週のスロット取得
   const { data: slots = [] } = useQuery({
@@ -100,25 +107,55 @@ export default function ScheduleTab({ room, members }: Props) {
     return false
   }, [localMySlots, myServerSlots])
 
-  // 確定済み授業取得（当週分）
-  const { data: lessons = [] } = useQuery({
-    queryKey: ['lessons', room.id, weekKey],
+  // 確定済み授業取得（全期間）
+  const { data: allLessons = [] } = useQuery({
+    queryKey: ['lessons', room.id, 'all'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('lessons').select('*').eq('room_id', room.id).eq('status', 'scheduled')
+        .order('scheduled_at', { ascending: false })
       if (error) throw error
-      return (data as Lesson[]).filter(l => isInWeek(l.scheduled_at, weekKey))
+      return data as Lesson[]
     },
     enabled: !!user,
   })
 
+  // 完了済み授業取得（累計時間用）
+  const { data: doneLessons = [] } = useQuery({
+    queryKey: ['lessons', room.id, 'done'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('lessons').select('*').eq('room_id', room.id).eq('status', 'done')
+      if (error) throw error
+      return data as Lesson[]
+    },
+    enabled: !!user,
+  })
+
+  // 当週の確定済み授業
+  const lessons = useMemo(
+    () => allLessons.filter(l => isInWeek(l.scheduled_at, weekKey)),
+    [allLessons, weekKey]
+  )
+
+  // 累計授業時間（分）
+  const totalDoneMinutes = useMemo(
+    () => doneLessons.reduce((acc, l) => acc + l.duration_minutes, 0),
+    [doneLessons]
+  )
+
   // セルのトグル（ローカルのみ）
   const toggleLocalSlot = (dayIndex: number, slotStart: number) => {
+    if (viewMode === 'view') return
     const key = `${dayIndex}-${slotStart}`
     setLocalMySlots(prev => {
       const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
+      if (viewMode === 'erase') {
+        next.delete(key)
+      } else {
+        if (next.has(key)) next.delete(key)
+        else next.add(key)
+      }
       return next
     })
   }
@@ -171,12 +208,12 @@ export default function ScheduleTab({ room, members }: Props) {
       if (error) throw error
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['lessons', room.id, weekKey] })
+      queryClient.invalidateQueries({ queryKey: ['lessons', room.id, 'all'] })
       setConfirmingSlot(null)
     },
   })
 
-  // スロットマップ（他の人のサーバーデータ）
+  // スロットマップ（全員のサーバーデータ）
   const slotsMap = useMemo(() => {
     const map = new Map<string, Set<string>>()
     for (const s of slots) {
@@ -196,6 +233,35 @@ export default function ScheduleTab({ room, members }: Props) {
     }
     return map
   }, [lessons])
+
+  // 連続スロット判定: 授業時間分の連続コマが全員揃っているかチェック
+  const slotsPerLesson = room.lesson_minutes / 30
+  const overlapStartKeys = useMemo(() => {
+    const keys = new Set<string>()
+    if (allPersonIds.size < 2) return keys // 講師+生徒が揃っていない場合はスキップ
+    for (let colIndex = 0; colIndex < 7; colIndex++) {
+      const dayIndex = COL_TO_DAY_INDEX[colIndex]
+      for (let i = 0; i < TIME_SLOTS.length - slotsPerLesson + 1; i++) {
+        const startSlot = TIME_SLOTS[i]
+        // lesson_minutes分の連続スロットを全員が持っているかチェック
+        let allMatch = true
+        for (let j = 0; j < slotsPerLesson; j++) {
+          const slotStart = startSlot + j * 30
+          const key = `${dayIndex}-${slotStart}`
+          const effectivePersons = new Set(slotsMap.get(key) ?? [])
+          // 自分のローカル選択を反映
+          if (localMySlots.has(key)) effectivePersons.add(user!.id)
+          else effectivePersons.delete(user!.id)
+          // 全員（講師＋全生徒）が揃っているか
+          const hasInstructor = effectivePersons.has(room.instructor_id)
+          const hasLearner = learnerIds.some(id => effectivePersons.has(id))
+          if (!hasInstructor || !hasLearner) { allMatch = false; break }
+        }
+        if (allMatch) keys.add(`${dayIndex}-${startSlot}`)
+      }
+    }
+    return keys
+  }, [slotsMap, localMySlots, allPersonIds, room.instructor_id, learnerIds, slotsPerLesson])
 
   // セルの状態（自分はローカル状態、他者はサーバー状態を参照）
   type CellState = 'lesson' | 'overlap' | 'mine' | 'other' | 'empty'
@@ -223,6 +289,55 @@ export default function ScheduleTab({ room, members }: Props) {
 
   const todayIdx = todayDayIndex()
 
+  if (showLessons) {
+    return (
+      <div className="flex flex-col">
+        {/* ヘッダー */}
+        <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100">
+          <button onClick={() => setShowLessons(false)} className="p-1 text-[#2D6A4F]">
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <h2 className="text-base font-bold text-[#1B1B1B]">確定した授業</h2>
+        </div>
+
+        {/* 累計時間 */}
+        <div className="bg-[#F7F9F7] mx-4 mt-4 rounded-2xl p-4 flex items-center justify-between">
+          <p className="text-sm text-[#6B7280]">これまでの累計授業時間</p>
+          <p className="text-base font-bold text-[#2D6A4F]">
+            {totalDoneMinutes >= 60
+              ? `${Math.floor(totalDoneMinutes / 60)}時間${totalDoneMinutes % 60 > 0 ? `${totalDoneMinutes % 60}分` : ''}`
+              : `${totalDoneMinutes}分`}
+          </p>
+        </div>
+
+        {/* 授業一覧 */}
+        <div className="px-4 py-4 space-y-3 overflow-y-auto" style={{ maxHeight: 'calc(100svh - 280px)' }}>
+          {allLessons.length === 0 ? (
+            <p className="text-sm text-[#6B7280] text-center py-8">確定した授業はありません</p>
+          ) : (
+            allLessons.map(lesson => {
+              const d = new Date(lesson.scheduled_at)
+              const endMin = d.getHours() * 60 + d.getMinutes() + lesson.duration_minutes
+              const dateStr = `${d.getMonth() + 1}月${d.getDate()}日(${['日','月','火','水','木','金','土'][d.getDay()]})`
+              const timeStr = `${minutesToTime(d.getHours() * 60 + d.getMinutes())} 〜 ${minutesToTime(endMin)}`
+              return (
+                <div key={lesson.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
+                  <div className="w-2 h-2 rounded-full bg-[#2D6A4F] shrink-0 mt-1" />
+                  <div>
+                    <p className="text-sm font-medium text-[#1B1B1B]">{dateStr}</p>
+                    <p className="text-xs text-[#6B7280]">{timeStr}（{lesson.duration_minutes}分）</p>
+                  </div>
+                </div>
+              )
+            })
+          )}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col">
       {/* 週ナビゲーション */}
@@ -242,8 +357,25 @@ export default function ScheduleTab({ room, members }: Props) {
         </button>
       </div>
 
+      {/* モード切り替え */}
+      <div className="flex gap-1 px-4 py-2 bg-white border-b border-gray-100">
+        {(['input', 'erase', 'view'] as ViewMode[]).map(mode => (
+          <button
+            key={mode}
+            onClick={() => setViewMode(mode)}
+            className={`flex-1 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+              viewMode === mode
+                ? 'bg-[#2D6A4F] text-white'
+                : 'bg-[#F3F4F6] text-[#6B7280]'
+            }`}
+          >
+            {mode === 'input' ? '入力' : mode === 'erase' ? '消去' : '閲覧'}
+          </button>
+        ))}
+      </div>
+
       {/* カレンダーグリッド */}
-      <div className="overflow-y-auto" style={{ maxHeight: 'calc(100svh - 320px)' }}>
+      <div className="overflow-y-auto" style={{ maxHeight: 'calc(100svh - 380px)' }}>
         {/* 曜日ヘッダー（sticky） */}
         <div
           className="sticky top-0 bg-white z-10 border-b border-gray-200"
@@ -272,6 +404,8 @@ export default function ScheduleTab({ room, members }: Props) {
             </div>
             {COL_TO_DAY_INDEX.map((dayIndex) => {
               const state = getCellState(dayIndex, slotStart)
+              // 連続スロット開始位置の判定
+              const isOverlapStart = overlapStartKeys.has(`${dayIndex}-${slotStart}`)
               const cellBg =
                 state === 'lesson' ? 'bg-[#2D6A4F]' :
                 state === 'overlap' ? 'bg-[#52B788]' :
@@ -283,14 +417,20 @@ export default function ScheduleTab({ room, members }: Props) {
                   key={dayIndex}
                   onClick={() => {
                     if (state === 'lesson') return
-                    if (state === 'overlap' && isInstructor) {
+                    if (state === 'overlap' && isInstructor && isOverlapStart) {
                       setConfirmingSlot({ dayIndex, slotStart })
-                    } else {
+                    } else if (viewMode !== 'view') {
                       toggleLocalSlot(dayIndex, slotStart)
                     }
                   }}
-                  className={`h-9 border border-white ${cellBg} transition-colors active:opacity-70`}
-                />
+                  className={`h-9 border border-white ${cellBg} transition-colors active:opacity-70 relative`}
+                >
+                  {isOverlapStart && isInstructor && (
+                    <span className="absolute inset-x-0 top-0.5 flex justify-center">
+                      <span className="w-1.5 h-1.5 rounded-full bg-white opacity-80" />
+                    </span>
+                  )}
+                </button>
               )
             })}
           </div>
@@ -304,15 +444,23 @@ export default function ScheduleTab({ room, members }: Props) {
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-[#52B788] inline-block" />調整可能</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-[#2D6A4F] inline-block" />授業確定</span>
         </div>
-        <button
-          onClick={() => submitSlots()}
-          disabled={!isDirty || isSubmitting}
-          className="w-full bg-[#2D6A4F] hover:bg-[#245c43] text-white font-bold py-3 rounded-2xl transition-colors disabled:opacity-40"
-        >
-          {isSubmitting ? '保存中...' : isDirty ? '予定を提出する' : '提出済み'}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => submitSlots()}
+            disabled={!isDirty || isSubmitting || viewMode === 'view'}
+            className="flex-1 bg-[#2D6A4F] hover:bg-[#245c43] text-white font-bold py-3 rounded-2xl transition-colors disabled:opacity-40"
+          >
+            {isSubmitting ? '保存中...' : isDirty ? '予定を提出する' : '提出済み'}
+          </button>
+          <button
+            onClick={() => setShowLessons(true)}
+            className="px-4 py-3 bg-[#F3F4F6] text-[#6B7280] rounded-2xl text-sm font-medium"
+          >
+            授業一覧
+          </button>
+        </div>
         {isInstructor && (
-          <p className="text-center text-xs text-[#52B788]">調整可能なコマをタップして授業を確定できます</p>
+          <p className="text-center text-xs text-[#52B788]">調整可能なコマ（●マーク）をタップして授業を確定できます</p>
         )}
       </div>
 

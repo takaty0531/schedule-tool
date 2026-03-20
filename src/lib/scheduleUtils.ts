@@ -3,10 +3,10 @@ export const DAY_LABELS = ['月', '火', '水', '木', '金', '土', '日']
 // 表示列インデックス → day_index のマッピング（列0=月=day_index1, ..., 列6=日=day_index0）
 export const COL_TO_DAY_INDEX = [1, 2, 3, 4, 5, 6, 0]
 
-// 8:00〜21:30 を30分単位で生成
+// 7:00〜23:00 を30分単位で生成
 export const TIME_SLOTS: number[] = (() => {
   const slots: number[] = []
-  for (let min = 8 * 60; min <= 21 * 60 + 30; min += 30) slots.push(min)
+  for (let min = 7 * 60; min <= 23 * 60; min += 30) slots.push(min)
   return slots
 })()
 
