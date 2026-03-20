@@ -73,10 +73,12 @@
 ```
 /                    ← ログイン画面（未認証のみ）
 /register            ← 新規登録画面（未認証のみ）
+/forgot-password     ← パスワード再設定メール送信
+/reset-password      ← 新しいパスワード入力（メールリンクから遷移）
 /setup/role          ← ロール選択（初回登録後）
 /setup/profile       ← プロフィール設定（名前・アバター）
 /dashboard           ← ルーム一覧（ロールで表示切替）
-/room/:id            ← スケジュール調整
+/room/:id            ← ルーム詳細・メンバー一覧・招待
 /room/:id/records    ← 授業記録一覧（未実装）
 /room/:id/lesson/:lid ← 授業詳細（記録・宿題・ファイル）（未実装）
 /invite/:token       ← 招待受け入れページ
@@ -107,16 +109,20 @@
 │   ├── types/
 │   │   └── database.ts      ← DB テーブルの TypeScript 型定義
 │   ├── pages/
-│   │   ├── LoginPage.tsx        ← ログイン
-│   │   ├── RegisterPage.tsx     ← 新規登録
-│   │   ├── DashboardPage.tsx    ← ルーム一覧（実装予定）
-│   │   ├── RoomPage.tsx         ← スケジュール調整（実装予定）
-│   │   ├── InvitePage.tsx       ← 招待受け入れ（実装予定）
-│   │   ├── SettingsPage.tsx     ← 設定（実装予定）
+│   │   ├── LoginPage.tsx           ← ログイン（パスワード表示切替あり）
+│   │   ├── RegisterPage.tsx        ← 新規登録（登録後自動ログイン）
+│   │   ├── ForgotPasswordPage.tsx  ← パスワード再設定メール送信
+│   │   ├── ResetPasswordPage.tsx   ← 新パスワード入力
+│   │   ├── DashboardPage.tsx       ← ルーム一覧・ルーム作成
+│   │   ├── RoomPage.tsx            ← ルーム詳細・メンバー・招待
+│   │   ├── InvitePage.tsx          ← 招待受け入れ
+│   │   ├── SettingsPage.tsx        ← 設定（実装予定）
 │   │   └── setup/
 │   │       ├── RoleSelectPage.tsx   ← ロール選択
 │   │       └── ProfileSetupPage.tsx ← プロフィール設定
-│   ├── components/          ← 共通UIコンポーネント（今後追加）
+│   ├── components/
+│   │   ├── Avatar.tsx           ← アバター表示（未設定時はイニシャル）
+│   │   └── BottomNav.tsx        ← 下部ナビゲーション
 │   └── hooks/               ← カスタムフック（今後追加）
 ├── index.html
 ├── vite.config.ts           ← base: '/schedule-tool/' 設定済み
@@ -280,7 +286,8 @@ UNIQUE (user_id, room_id)
 |---|---|---|
 | フェーズ1 | 環境構築（Vite・Tailwind・Router・Supabase） | ✅ 完了 |
 | フェーズ2 | 認証・プロフィール設定 | ✅ 完了 |
-| フェーズ3 | ルーム作成・招待機能 | 🔲 未着手 |
+| フェーズ2+ | パスワード表示切替・忘れた場合の再設定 | ✅ 完了 |
+| フェーズ3 | ルーム作成・招待機能・招待受け入れ | ✅ 完了 |
 | フェーズ4 | スケジュール調整画面 | 🔲 未着手 |
 | フェーズ5 | 授業記録・ファイルアップロード | 🔲 未着手 |
 | フェーズ6 | LINE通知（Edge Functions + pg_cron） | 🔲 未着手 |
