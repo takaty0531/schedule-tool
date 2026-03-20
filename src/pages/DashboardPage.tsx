@@ -24,7 +24,8 @@ function CreateRoomModal({ onClose }: { onClose: () => void }) {
       if (error) throw error
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['rooms'] })
+      queryClient.invalidateQueries({ queryKey: ['rooms', 'instructor'] })
+      queryClient.invalidateQueries({ queryKey: ['rooms', 'member'] })
       onClose()
     },
   })
