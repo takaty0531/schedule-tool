@@ -332,7 +332,11 @@ export default function RoomPage() {
                   const ci = l.learner_id ? learnerIdList.indexOf(l.learner_id) % COLORS.length : 0
                   const dotColor = learnerMember ? COLORS[ci < 0 ? 0 : ci] : '#2D6A4F'
                   return (
-                    <div key={l.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
+                    <button
+                      key={l.id}
+                      onClick={() => navigate(`/room/${id}/lesson/${l.id}`)}
+                      className="w-full bg-white rounded-2xl p-4 flex items-center gap-3 text-left active:opacity-70 transition-opacity"
+                    >
                       <div className="w-2 h-2 rounded-full shrink-0" style={{ background: dotColor }} />
                       <div className="flex-1">
                         <p className="text-sm font-medium text-[#1B1B1B]">
@@ -345,7 +349,10 @@ export default function RoomPage() {
                           <p className="text-xs font-medium mt-0.5" style={{ color: dotColor }}>{learnerMember.display_name}</p>
                         )}
                       </div>
-                    </div>
+                      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#D1D5DB" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
                   )
                 })}
               </div>
