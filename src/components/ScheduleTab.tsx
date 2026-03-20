@@ -51,7 +51,7 @@ function LessonConfirmModal({
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-t-3xl w-full max-w-lg p-6 space-y-5" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-t-3xl w-full max-w-lg px-6 pt-6 space-y-5 overflow-y-auto" style={{ maxHeight: '90svh', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }} onClick={e => e.stopPropagation()}>
         <h2 className="text-lg font-bold text-[#1B1B1B]">授業を確定しますか？</h2>
         <div className="bg-[#F7F9F7] rounded-2xl p-4 space-y-1">
           <p className="text-sm font-medium text-[#1B1B1B]">{date}</p>
