@@ -83,7 +83,7 @@ export default function DashboardPage() {
   const [showCreate, setShowCreate] = useState(false)
 
   // 講師: 自分が作ったルーム一覧
-  const { data: instructorRooms = [], error: roomsError } = useQuery({
+  const { data: instructorRooms = [], error: roomsError, isLoading: roomsLoading } = useQuery({
     queryKey: ['rooms', 'instructor', user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -149,7 +149,11 @@ export default function DashboardPage() {
         )}
 
         {/* ルーム一覧 */}
-        {rooms.length === 0 ? (
+        {roomsLoading ? (
+          <div className="text-center py-16 text-[#6B7280]">
+            <div className="w-6 h-6 border-2 border-[#2D6A4F] border-t-transparent rounded-full animate-spin mx-auto" />
+          </div>
+        ) : rooms.length === 0 ? (
           <div className="text-center py-16 text-[#6B7280]">
             <p className="text-4xl mb-3">📚</p>
             <p className="text-sm">
