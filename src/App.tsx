@@ -22,6 +22,15 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+// プロフィール設定済みユーザーのみアクセス可能なルート（未設定なら/setup/roleへ）
+function ProfileRoute({ children }: { children: React.ReactNode }) {
+  const { session, profile, loading } = useAuth()
+  if (loading) return <div className="min-h-svh flex items-center justify-center"><div className="w-6 h-6 border-2 border-[#2D6A4F] border-t-transparent rounded-full animate-spin" /></div>
+  if (!session) return <Navigate to="/" replace />
+  if (!profile) return <Navigate to="/setup/role" replace />
+  return <>{children}</>
+}
+
 // 未認証ユーザーのみアクセス可能なルート（ログイン済みなら/dashboardへ）
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
@@ -37,12 +46,12 @@ function AppRoutes() {
       <Route path="/register" element={<PublicRoute><RegisterPage /></PublicRoute>} />
       <Route path="/setup/role" element={<PrivateRoute><RoleSelectPage /></PrivateRoute>} />
       <Route path="/setup/profile" element={<PrivateRoute><ProfileSetupPage /></PrivateRoute>} />
-      <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
-      <Route path="/room/:id" element={<PrivateRoute><RoomPage /></PrivateRoute>} />
+      <Route path="/dashboard" element={<ProfileRoute><DashboardPage /></ProfileRoute>} />
+      <Route path="/room/:id" element={<ProfileRoute><RoomPage /></ProfileRoute>} />
       <Route path="/invite/:token" element={<InvitePage />} />
       <Route path="/forgot-password" element={<PublicRoute><ForgotPasswordPage /></PublicRoute>} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
+      <Route path="/settings" element={<ProfileRoute><SettingsPage /></ProfileRoute>} />
     </Routes>
   )
 }

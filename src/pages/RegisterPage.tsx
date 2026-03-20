@@ -9,6 +9,7 @@ export default function RegisterPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [emailSent, setEmailSent] = useState(false)
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -18,16 +19,58 @@ export default function RegisterPage() {
       return
     }
     setLoading(true)
-    const { error } = await supabase.auth.signUp({ email, password })
+    const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) {
       setLoading(false)
-      setError('登録に失敗しました。もう一度お試しください')
+      if (error.message.includes('already registered') || error.message.includes('already been registered') || error.code === 'user_already_exists') {
+        setError('このメールアドレスはすでに登録されています。ログイン画面からサインインしてください。')
+      } else {
+        setError('登録に失敗しました。もう一度お試しください')
+      }
       return
     }
-    // 登録後そのままログイン
-    await supabase.auth.signInWithPassword({ email, password })
+    // Supabaseはメール確認が有効な場合でもエラーを返さず user を返す（identities が空）
+    if (data.user && data.user.identities && data.user.identities.length === 0) {
+      setLoading(false)
+      setError('このメールアドレスはすでに登録されています。ログイン画面からサインインしてください。')
+      return
+    }
     setLoading(false)
-    navigate('/setup/role')
+    // セッションがある場合はメール確認不要 → そのままセットアップへ
+    if (data.session) {
+      navigate('/setup/role')
+      return
+    }
+    // セッションがない場合はメール確認が必要
+    setEmailSent(true)
+  }
+
+  if (emailSent) {
+    return (
+      <div className="min-h-svh flex flex-col items-center justify-center bg-[#F7F9F7] px-6">
+        <div className="w-full max-w-sm space-y-8">
+          <div className="text-center">
+            <h1 className="text-3xl font-bold text-[#2D6A4F] tracking-tight">ForClass</h1>
+          </div>
+          <div className="bg-white rounded-2xl shadow-sm p-8 text-center space-y-4">
+            <div className="w-16 h-16 bg-[#D8F3DC] rounded-full flex items-center justify-center mx-auto">
+              <svg width="32" height="32" fill="none" viewBox="0 0 24 24" stroke="#2D6A4F" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+            </div>
+            <h2 className="text-lg font-bold text-[#1B1B1B]">確認メールを送信しました</h2>
+            <p className="text-sm text-[#6B7280]">
+              <span className="font-medium text-[#1B1B1B]">{email}</span> に確認メールを送りました。<br />
+              メール内のリンクをクリックして登録を完了してください。
+            </p>
+            <p className="text-xs text-[#6B7280]">メールが届かない場合は迷惑メールフォルダをご確認ください。</p>
+            <Link to="/" className="block mt-4 text-sm text-[#2D6A4F] font-medium">
+              ログイン画面に戻る
+            </Link>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (

@@ -120,7 +120,7 @@ export default function DashboardPage() {
           <Avatar avatarUrl={profile?.avatar_url ?? null} displayName={profile?.display_name ?? ''} size={36} />
           <div>
             <p className="text-xs text-[#6B7280]">
-              {profile?.role === 'instructor' ? '先生' : profile?.role === 'guardian' ? '保護者' : '生徒'}
+              {profile?.role === 'instructor' ? '先生' : profile?.role === 'guardian' ? '保護者' : profile?.role === 'learner' ? '生徒' : ''}
             </p>
             <p className="text-sm font-bold text-[#1B1B1B]">{profile?.display_name}</p>
           </div>
