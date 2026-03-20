@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react'
+import { useState, useMemo, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
@@ -47,7 +47,9 @@ function HomeworkModal({
   editing: Homework | null
   onClose: () => void
 }) {
+  const { user } = useAuth()
   const queryClient = useQueryClient()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState(editing?.title ?? '')
   const [description, setDescription] = useState(editing?.description ?? '')
   const [referenceText, setReferenceText] = useState(editing?.reference_text ?? '')
@@ -55,6 +57,14 @@ function HomeworkModal({
   const [dueType, setDueType] = useState<'lesson' | 'next_lesson' | 'custom' | ''>(editing?.due_type ?? '')
   const [dueLessonId, setDueLessonId] = useState(editing?.due_lesson_id ?? '')
   const [dueDate, setDueDate] = useState(editing?.due_date ?? '')
+  const [pendingFiles, setPendingFiles] = useState<File[]>([])
+
+  const handleAddFile = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setPendingFiles(prev => [...prev, file])
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }, [])
 
   const { mutate, isPending } = useMutation({
     mutationFn: async () => {
@@ -67,12 +77,29 @@ function HomeworkModal({
         due_lesson_id: dueType === 'lesson' ? (dueLessonId || null) : null,
         due_date: dueType === 'custom' ? (dueDate || null) : null,
       }
+      let hwId = editing?.id
       if (editing) {
         const { error } = await supabase.from('homework').update(payload).eq('id', editing.id)
         if (error) throw error
       } else {
-        const { error } = await supabase.from('homework').insert({ room_id: room.id, ...payload })
+        const { data, error } = await supabase.from('homework').insert({ room_id: room.id, ...payload }).select('id').single()
         if (error) throw error
+        hwId = data.id
+      }
+      // ファイルアップロード
+      if (hwId && pendingFiles.length > 0 && user) {
+        for (const file of pendingFiles) {
+          const ext = file.name.split('.').pop()
+          const filePath = `homework/${hwId}/${Date.now()}.${ext}`
+          const { error: upErr } = await supabase.storage.from('lessons').upload(filePath, file)
+          if (upErr) continue
+          await supabase.from('homework_files').insert({
+            homework_id: hwId,
+            uploader_id: user.id,
+            file_path: filePath,
+            file_name: file.name,
+          })
+        }
       }
     },
     onSuccess: () => {
@@ -200,6 +227,50 @@ function HomeworkModal({
             maxLength={300}
             className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788] resize-none"
           />
+        </div>
+
+        {/* 参考資料ファイル */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-sm font-medium text-[#1B1B1B]">参考資料ファイル（任意）</label>
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="text-xs text-[#52B788] font-medium px-3 py-1.5 rounded-lg bg-[#F0FDF4]"
+            >
+              ＋ 追加
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleAddFile}
+              accept="image/*,.pdf,.doc,.docx,.xlsx,.pptx"
+            />
+          </div>
+          {pendingFiles.length === 0 ? (
+            <p className="text-xs text-[#9CA3AF]">ファイルが選択されていません</p>
+          ) : (
+            <div className="space-y-1.5">
+              {pendingFiles.map((f, i) => (
+                <div key={i} className="flex items-center gap-2 p-2 bg-[#F7F9F7] rounded-xl">
+                  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="#2D6A4F" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span className="flex-1 text-xs text-[#1B1B1B] truncate">{f.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPendingFiles(prev => prev.filter((_, j) => j !== i))}
+                    className="text-[#D1D5DB] p-0.5"
+                  >
+                    <svg width="12" height="12" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         <button
