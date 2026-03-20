@@ -109,7 +109,7 @@ function HomeworkModal({
   })
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50 pt-16" onClick={onClose}>
       <div
         className="bg-white rounded-t-3xl w-full max-w-lg px-6 pt-6 space-y-4 overflow-y-auto"
         style={{ maxHeight: '90svh', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
@@ -367,7 +367,7 @@ function HomeworkDetailModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50 pt-16" onClick={onClose}>
       <div
         className="bg-white rounded-t-3xl w-full max-w-lg px-6 pt-6 space-y-4 overflow-y-auto"
         style={{ maxHeight: '90svh', paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom))' }}
