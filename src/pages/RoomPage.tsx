@@ -5,7 +5,10 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import BottomNav from '../components/BottomNav'
 import Avatar from '../components/Avatar'
+import ScheduleTab from '../components/ScheduleTab'
 import type { Room, RoomMember, Profile, Invitation } from '../types/database'
+
+type Tab = 'members' | 'schedule'
 
 // トークン生成
 function generateToken() {
@@ -137,6 +140,7 @@ export default function RoomPage() {
   const navigate = useNavigate()
   const { profile } = useAuth()
   const [showInvite, setShowInvite] = useState(false)
+  const [activeTab, setActiveTab] = useState<Tab>('members')
 
   // ルーム情報
   const { data: room } = useQuery({
@@ -182,18 +186,40 @@ export default function RoomPage() {
   return (
     <div className="min-h-svh bg-[#F7F9F7] pb-20">
       {/* ヘッダー */}
-      <div className="bg-white px-4 pt-12 pb-4 flex items-center gap-3">
+      <div className="bg-white px-4 pt-12 pb-0 flex items-center gap-3">
         <button onClick={() => navigate('/dashboard')}>
           <svg width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="#1B1B1B" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
           </svg>
         </button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-lg font-bold text-[#1B1B1B]">{room.name}</h1>
           <p className="text-xs text-[#6B7280]">授業時間: {room.lesson_minutes}分</p>
         </div>
       </div>
 
+      {/* タブ */}
+      <div className="bg-white border-b border-gray-200 flex">
+        {(['members', 'schedule'] as Tab[]).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={`flex-1 py-3 text-sm font-medium transition-colors border-b-2 ${
+              activeTab === tab
+                ? 'border-[#2D6A4F] text-[#2D6A4F]'
+                : 'border-transparent text-[#6B7280]'
+            }`}
+          >
+            {tab === 'members' ? 'メンバー' : 'スケジュール'}
+          </button>
+        ))}
+      </div>
+
+      {activeTab === 'schedule' ? (
+        <div className="max-w-lg mx-auto">
+          <ScheduleTab room={room} members={members} />
+        </div>
+      ) : (
       <div className="max-w-lg mx-auto px-4 py-6 space-y-5">
         {/* 招待ボタン（講師のみ） */}
         {profile?.role === 'instructor' && (
@@ -246,12 +272,8 @@ export default function RoomPage() {
           </div>
         )}
 
-        {/* スケジュール調整（今後実装） */}
-        <div className="bg-white rounded-2xl p-4">
-          <h2 className="text-sm font-bold text-[#6B7280] mb-2">スケジュール調整</h2>
-          <p className="text-sm text-[#6B7280]">フェーズ4で実装予定</p>
-        </div>
       </div>
+      )}
 
       {showInvite && room && (
         <InviteModal room={room} members={members} onClose={() => setShowInvite(false)} />
