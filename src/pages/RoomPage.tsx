@@ -113,6 +113,7 @@ function InviteModal({ room, members, onClose }: { room: Room; members: (RoomMem
             >
               {isPending ? '生成中...' : '招待リンクを生成'}
             </button>
+            <button onClick={onClose} className="w-full text-sm text-[#6B7280] py-2">キャンセル</button>
           </>
         ) : (
           // 招待URL表示

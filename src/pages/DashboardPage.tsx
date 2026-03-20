@@ -72,6 +72,7 @@ function CreateRoomModal({ onClose }: { onClose: () => void }) {
         >
           {isPending ? '作成中...' : '作成する'}
         </button>
+        <button onClick={onClose} className="w-full text-sm text-[#6B7280] py-2">キャンセル</button>
       </div>
     </div>
   )
