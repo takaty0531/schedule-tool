@@ -109,7 +109,6 @@ export default function ScheduleTab({ room, members }: Props) {
   const [confirmingSlot, setConfirmingSlot] = useState<{ dayIndex: number; slotStart: number; learnerIds: string[] } | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('input')
   const [localMySlots, setLocalMySlots] = useState<Set<string>>(new Set())
-  const [showLessons, setShowLessons] = useState(false)
 
   const isInstructor = user?.id === room.instructor_id
   const thisWeekKey = getWeekKey(getThisMonday())
@@ -165,27 +164,10 @@ export default function ScheduleTab({ room, members }: Props) {
     enabled: !!user,
   })
 
-  // 完了済み授業（累計時間用）
-  const { data: doneLessons = [] } = useQuery({
-    queryKey: ['lessons', room.id, 'done'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('lessons').select('*').eq('room_id', room.id).eq('status', 'done')
-      if (error) throw error
-      return data as Lesson[]
-    },
-    enabled: !!user,
-  })
-
   // 当週の確定済み授業
   const lessons = useMemo(
     () => allLessons.filter(l => isInWeek(l.scheduled_at, weekKey)),
     [allLessons, weekKey]
-  )
-
-  const totalDoneMinutes = useMemo(
-    () => doneLessons.reduce((acc, l) => acc + l.duration_minutes, 0),
-    [doneLessons]
   )
 
   // セルのトグル（ローカルのみ）
@@ -345,58 +327,6 @@ export default function ScheduleTab({ room, members }: Props) {
 
   const todayIdx = todayDayIndex()
 
-  // 授業一覧画面
-  if (showLessons) {
-    const totalDoneLabel = totalDoneMinutes >= 60
-      ? `${Math.floor(totalDoneMinutes / 60)}時間${totalDoneMinutes % 60 > 0 ? `${totalDoneMinutes % 60}分` : ''}`
-      : `${totalDoneMinutes}分`
-    return (
-      <div className="flex flex-col">
-        <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100">
-          <button onClick={() => setShowLessons(false)} className="p-1 text-[#2D6A4F]">
-            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-          </button>
-          <h2 className="text-base font-bold text-[#1B1B1B]">確定した授業</h2>
-        </div>
-        <div className="bg-[#F7F9F7] mx-4 mt-4 rounded-2xl p-4 flex items-center justify-between">
-          <p className="text-sm text-[#6B7280]">累計授業時間</p>
-          <p className="text-base font-bold text-[#2D6A4F]">{totalDoneMinutes > 0 ? totalDoneLabel : '—'}</p>
-        </div>
-        <div className="px-4 py-4 space-y-3 overflow-y-auto" style={{ maxHeight: 'calc(100svh - 280px)' }}>
-          {allLessons.length === 0 ? (
-            <p className="text-sm text-[#6B7280] text-center py-8">確定した授業はありません</p>
-          ) : (
-            allLessons.map(lesson => {
-              const d = new Date(lesson.scheduled_at)
-              const endMin = d.getHours() * 60 + d.getMinutes() + lesson.duration_minutes
-              const dateStr = `${d.getMonth() + 1}月${d.getDate()}日(${['日','月','火','水','木','金','土'][d.getDay()]})`
-              const timeStr = `${minutesToTime(d.getHours() * 60 + d.getMinutes())} 〜 ${minutesToTime(endMin)}`
-              const learnerMember = lesson.learner_id ? members.find(m => m.learner_id === lesson.learner_id) : null
-              const ci = lesson.learner_id ? (learnerColorIndex.get(lesson.learner_id) ?? 0) % LEARNER_COLORS.length : 0
-              return (
-                <div key={lesson.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
-                  <div
-                    className="w-2 h-2 rounded-full shrink-0 mt-1"
-                    style={{ background: learnerMember ? LEARNER_COLORS[ci].active : '#2D6A4F' }}
-                  />
-                  <div>
-                    <p className="text-sm font-medium text-[#1B1B1B]">{dateStr}</p>
-                    <p className="text-xs text-[#6B7280]">{timeStr}（{lesson.duration_minutes}分）</p>
-                    {learnerMember && (
-                      <p className="text-xs mt-0.5" style={{ color: LEARNER_COLORS[ci].active }}>{learnerMember.display_name}</p>
-                    )}
-                  </div>
-                </div>
-              )
-            })
-          )}
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="flex flex-col">
       {/* 週ナビゲーション */}
@@ -531,21 +461,13 @@ export default function ScheduleTab({ room, members }: Props) {
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: LEARNER_COLORS[0].active }} />調整可能</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-[#2D6A4F] inline-block" />授業確定</span>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => submitSlots()}
-            disabled={!isDirty || isSubmitting || viewMode === 'view'}
-            className="flex-1 bg-[#2D6A4F] hover:bg-[#245c43] text-white font-bold py-3 rounded-2xl transition-colors disabled:opacity-40"
-          >
-            {isSubmitting ? '保存中...' : isDirty ? '予定を提出する' : '提出済み'}
-          </button>
-          <button
-            onClick={() => setShowLessons(true)}
-            className="px-4 py-3 bg-[#F3F4F6] text-[#6B7280] rounded-2xl text-sm font-medium"
-          >
-            授業一覧
-          </button>
-        </div>
+        <button
+          onClick={() => submitSlots()}
+          disabled={!isDirty || isSubmitting || viewMode === 'view'}
+          className="w-full bg-[#2D6A4F] hover:bg-[#245c43] text-white font-bold py-3 rounded-2xl transition-colors disabled:opacity-40"
+        >
+          {isSubmitting ? '保存中...' : isDirty ? '予定を提出する' : '提出済み'}
+        </button>
         {isInstructor && (
           <p className="text-center text-xs text-[#52B788]">●マークのコマをタップして授業を確定できます</p>
         )}

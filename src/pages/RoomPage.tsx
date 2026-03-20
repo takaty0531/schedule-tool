@@ -257,63 +257,76 @@ export default function RoomPage() {
         </div>
       )}
       {activeTab === 'detail' && (() => {
+        const COLORS = ['#3B82F6','#CA8A04','#DB2777','#7C3AED','#EA580C']
+        const learnerIdList = members.map(m => m.learner_id)
         const totalDoneMin = doneLessons.reduce((acc, l) => acc + l.duration_minutes, 0)
         const totalDoneLabel = totalDoneMin >= 60
           ? `${Math.floor(totalDoneMin / 60)}時間${totalDoneMin % 60 > 0 ? `${totalDoneMin % 60}分` : ''}`
           : `${totalDoneMin}分`
+        const days = ['日','月','火','水','木','金','土']
+        const nextLesson = scheduledLessons[0] ?? null
+
         return (
-        <div className="max-w-lg mx-auto px-4 py-6 space-y-5">
+        <div className="max-w-lg mx-auto px-4 py-6 space-y-5 overflow-y-auto" style={{ maxHeight: 'calc(100svh - 200px)' }}>
+
+          {/* ルーム情報カード */}
+          <div className="bg-white rounded-2xl p-4 space-y-1">
+            <p className="text-xs text-[#6B7280]">ルーム名</p>
+            <p className="font-bold text-[#1B1B1B] text-base">{room.name}</p>
+            <p className="text-xs text-[#6B7280]">授業時間: {room.lesson_minutes}分</p>
+            {room.description && (
+              <p className="text-sm text-[#1B1B1B] whitespace-pre-wrap pt-1">{room.description}</p>
+            )}
+          </div>
 
           {/* 統計カード */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="bg-white rounded-2xl p-4 text-center">
-              <p className="text-2xl font-bold text-[#2D6A4F]">{scheduledLessons.length}</p>
-              <p className="text-xs text-[#6B7280] mt-1">予定授業数</p>
+          <div className="grid grid-cols-3 gap-2">
+            <div className="bg-white rounded-2xl p-3 text-center">
+              <p className="text-xl font-bold text-[#2D6A4F]">{members.length}</p>
+              <p className="text-[10px] text-[#6B7280] mt-0.5">生徒数</p>
             </div>
-            <div className="bg-white rounded-2xl p-4 text-center">
-              <p className="text-2xl font-bold text-[#2D6A4F]">{totalDoneMin > 0 ? totalDoneLabel : '—'}</p>
-              <p className="text-xs text-[#6B7280] mt-1">累計授業時間</p>
+            <div className="bg-white rounded-2xl p-3 text-center">
+              <p className="text-xl font-bold text-[#2D6A4F]">{scheduledLessons.length}</p>
+              <p className="text-[10px] text-[#6B7280] mt-0.5">予定授業</p>
+            </div>
+            <div className="bg-white rounded-2xl p-3 text-center">
+              <p className="text-xl font-bold text-[#2D6A4F]">{totalDoneMin > 0 ? totalDoneLabel : '—'}</p>
+              <p className="text-[10px] text-[#6B7280] mt-0.5">累計時間</p>
             </div>
           </div>
 
-          {/* ルーム説明 */}
-          {room.description && (
-            <div className="bg-white rounded-2xl p-4">
-              <h2 className="text-sm font-bold text-[#6B7280] mb-2">説明</h2>
-              <p className="text-sm text-[#1B1B1B] whitespace-pre-wrap">{room.description}</p>
-            </div>
-          )}
-
           {/* 次回の授業 */}
-          {scheduledLessons.length > 0 && (() => {
-            const next = scheduledLessons[0]
-            const d = new Date(next.scheduled_at)
-            const days = ['日', '月', '火', '水', '木', '金', '土']
-            const endMin = d.getHours() * 60 + d.getMinutes() + next.duration_minutes
+          {nextLesson && (() => {
+            const d = new Date(nextLesson.scheduled_at)
+            const endMin = d.getHours() * 60 + d.getMinutes() + nextLesson.duration_minutes
+            const learnerMember = nextLesson.learner_id ? members.find(m => m.learner_id === nextLesson.learner_id) : null
             return (
               <div className="bg-[#2D6A4F] rounded-2xl p-4 text-white">
-                <p className="text-xs opacity-75 mb-1">次回の授業</p>
-                <p className="font-bold">{d.getMonth() + 1}月{d.getDate()}日({days[d.getDay()]})</p>
-                <p className="text-sm opacity-90 mt-0.5">
-                  {minutesToTime(d.getHours() * 60 + d.getMinutes())} 〜 {minutesToTime(endMin)}（{next.duration_minutes}分）
+                <p className="text-xs opacity-70 mb-1">次回の授業</p>
+                <p className="font-bold text-base">
+                  {d.getMonth() + 1}月{d.getDate()}日({days[d.getDay()]})
                 </p>
+                <p className="text-sm opacity-90 mt-0.5">
+                  {minutesToTime(d.getHours() * 60 + d.getMinutes())} 〜 {minutesToTime(endMin)}（{nextLesson.duration_minutes}分）
+                </p>
+                {learnerMember && (
+                  <p className="text-xs mt-1 opacity-80">{learnerMember.display_name}</p>
+                )}
               </div>
             )
           })()}
 
           {/* 確定済み授業一覧 */}
-          {scheduledLessons.length > 0 && (() => {
-            const COLORS = [
-              '#3B82F6','#CA8A04','#DB2777','#7C3AED','#EA580C',
-            ]
-            const learnerIdList = members.map(m => m.learner_id)
-            return (
-            <div>
-              <h2 className="text-sm font-bold text-[#6B7280] mb-3">確定済み授業 ({scheduledLessons.length})</h2>
+          <div>
+            <h2 className="text-sm font-bold text-[#6B7280] mb-3">
+              授業予定 ({scheduledLessons.length})
+            </h2>
+            {scheduledLessons.length === 0 ? (
+              <p className="text-sm text-[#6B7280] text-center py-4">授業予定はありません</p>
+            ) : (
               <div className="space-y-2">
                 {scheduledLessons.map(l => {
                   const d = new Date(l.scheduled_at)
-                  const days = ['日', '月', '火', '水', '木', '金', '土']
                   const endMin = d.getHours() * 60 + d.getMinutes() + l.duration_minutes
                   const learnerMember = l.learner_id ? members.find(m => m.learner_id === l.learner_id) : null
                   const ci = l.learner_id ? learnerIdList.indexOf(l.learner_id) % COLORS.length : 0
@@ -321,7 +334,7 @@ export default function RoomPage() {
                   return (
                     <div key={l.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
                       <div className="w-2 h-2 rounded-full shrink-0" style={{ background: dotColor }} />
-                      <div>
+                      <div className="flex-1">
                         <p className="text-sm font-medium text-[#1B1B1B]">
                           {d.getMonth() + 1}月{d.getDate()}日({days[d.getDay()]})
                         </p>
@@ -336,9 +349,8 @@ export default function RoomPage() {
                   )
                 })}
               </div>
-            </div>
-            )
-          })()}
+            )}
+          </div>
 
           {/* メンバー一覧 */}
           <div>
@@ -347,15 +359,19 @@ export default function RoomPage() {
               <p className="text-sm text-[#6B7280] text-center py-4">まだメンバーがいません</p>
             ) : (
               <div className="space-y-2">
-                {members.map(m => (
-                  <div key={m.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
-                    <Avatar avatarUrl={m.profile.avatar_url} displayName={m.display_name} size={40} />
-                    <div>
-                      <p className="font-medium text-[#1B1B1B]">{m.display_name}</p>
-                      <p className="text-xs text-[#6B7280]">生徒</p>
+                {members.map((m, i) => {
+                  const ci = i % COLORS.length
+                  return (
+                    <div key={m.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
+                      <Avatar avatarUrl={m.profile.avatar_url} displayName={m.display_name} size={40} />
+                      <div className="flex-1">
+                        <p className="font-medium text-[#1B1B1B]">{m.display_name}</p>
+                        <p className="text-xs text-[#6B7280]">生徒</p>
+                      </div>
+                      <span className="w-3 h-3 rounded-full" style={{ background: COLORS[ci] }} />
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
