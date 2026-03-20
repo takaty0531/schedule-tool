@@ -15,9 +15,11 @@ export default function RoleSelectPage() {
   const { user } = useAuth()
   const [selected, setSelected] = useState<Role | null>(null)
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
   const handleNext = async () => {
     if (!selected || !user) return
+    setError('')
     setLoading(true)
     const { error } = await supabase.from('profiles').insert({
       id: user.id,
@@ -25,7 +27,10 @@ export default function RoleSelectPage() {
       display_name: '',
     })
     setLoading(false)
-    if (error) return
+    if (error) {
+      setError('保存に失敗しました。もう一度お試しください。')
+      return
+    }
     navigate('/setup/profile')
   }
 
@@ -50,14 +55,13 @@ export default function RoleSelectPage() {
             >
               <div className="flex items-center gap-4">
                 <span className="text-3xl">{role.icon}</span>
-                <div>
-                  <p className="font-bold text-[#1B1B1B]">{role.label}</p>
-                  <p className="text-sm text-[#6B7280]">{role.description}</p>
-                </div>
+                <p className="font-bold text-[#1B1B1B]">{role.label}</p>
               </div>
             </button>
           ))}
         </div>
+
+        {error && <p className="text-red-500 text-sm text-center">{error}</p>}
 
         <button
           onClick={handleNext}
