@@ -58,6 +58,7 @@ export type Slot = {
 export type Lesson = {
   id: string
   room_id: string
+  learner_id: string | null
   scheduled_at: string
   duration_minutes: number
   status: 'scheduled' | 'done' | 'cancelled'

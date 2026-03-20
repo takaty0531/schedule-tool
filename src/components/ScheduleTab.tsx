@@ -17,19 +17,38 @@ type Props = {
 
 type ViewMode = 'input' | 'erase' | 'view'
 
+// 生徒ごとの色パレット（bg=スロットのみ, active=講師との重複）
+const LEARNER_COLORS = [
+  { bg: '#DBEAFE', active: '#3B82F6' }, // blue
+  { bg: '#FEF9C3', active: '#CA8A04' }, // yellow
+  { bg: '#FCE7F3', active: '#DB2777' }, // pink
+  { bg: '#EDE9FE', active: '#7C3AED' }, // purple
+  { bg: '#FFEDD5', active: '#EA580C' }, // orange
+] as const
+
 // 授業確定モーダル
 function LessonConfirmModal({
-  weekKey, dayIndex, slotStart, lessonMinutes, isConfirming, onConfirm, onClose,
+  weekKey, dayIndex, slotStart, lessonMinutes, isConfirming,
+  overlappingLearnerIds, members,
+  onConfirm, onClose,
 }: {
   weekKey: string; dayIndex: number; slotStart: number
   lessonMinutes: number; isConfirming: boolean
-  onConfirm: () => void; onClose: () => void
+  overlappingLearnerIds: string[]
+  members: (RoomMember & { profile: Profile })[]
+  onConfirm: (learnerId: string) => void
+  onClose: () => void
 }) {
+  const learnerIdList = members.map(m => m.learner_id)
+  const [selectedLearnerId, setSelectedLearnerId] = useState(
+    overlappingLearnerIds.length === 1 ? overlappingLearnerIds[0] : ''
+  )
   const endMin = slotStart + lessonMinutes
   const date = (() => {
     const d = new Date(toScheduledAt(weekKey, dayIndex, slotStart))
     return `${d.getMonth() + 1}月${d.getDate()}日(${['日','月','火','水','木','金','土'][d.getDay()]})`
   })()
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50" onClick={onClose}>
       <div className="bg-white rounded-t-3xl w-full max-w-lg p-6 space-y-5" onClick={e => e.stopPropagation()}>
@@ -40,9 +59,39 @@ function LessonConfirmModal({
             {minutesToTime(slotStart)} 〜 {minutesToTime(endMin)}（{lessonMinutes}分）
           </p>
         </div>
+
+        {/* 生徒選択 */}
+        <div>
+          <p className="text-sm font-medium text-[#1B1B1B] mb-2">生徒を選択</p>
+          <div className="space-y-2">
+            {overlappingLearnerIds.map(lid => {
+              const ci = learnerIdList.indexOf(lid) % LEARNER_COLORS.length
+              const color = LEARNER_COLORS[ci < 0 ? 0 : ci]
+              const member = members.find(m => m.learner_id === lid)
+              return (
+                <button
+                  key={lid}
+                  onClick={() => setSelectedLearnerId(lid)}
+                  className={`w-full flex items-center gap-3 p-3 rounded-xl border-2 transition-colors ${
+                    selectedLearnerId === lid ? 'border-[#2D6A4F]' : 'border-gray-200'
+                  }`}
+                >
+                  <span className="w-3 h-3 rounded-full shrink-0" style={{ background: color.active }} />
+                  <span className="text-sm font-medium text-[#1B1B1B]">{member?.display_name}</span>
+                  {selectedLearnerId === lid && (
+                    <svg className="ml-auto" width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#2D6A4F" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
         <button
-          onClick={onConfirm}
-          disabled={isConfirming}
+          onClick={() => selectedLearnerId && onConfirm(selectedLearnerId)}
+          disabled={isConfirming || !selectedLearnerId}
           className="w-full bg-[#2D6A4F] hover:bg-[#245c43] text-white font-bold py-3 rounded-2xl transition-colors disabled:opacity-50"
         >
           {isConfirming ? '確定中...' : '授業を確定する'}
@@ -57,70 +106,66 @@ export default function ScheduleTab({ room, members }: Props) {
   const { user } = useAuth()
   const queryClient = useQueryClient()
   const [weekKey, setWeekKey] = useState(() => getWeekKey(getThisMonday()))
-  const [confirmingSlot, setConfirmingSlot] = useState<{ dayIndex: number; slotStart: number } | null>(null)
+  const [confirmingSlot, setConfirmingSlot] = useState<{ dayIndex: number; slotStart: number; learnerIds: string[] } | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('input')
-  // ローカルの選択状態: `${dayIndex}-${slotStart}` のSet
   const [localMySlots, setLocalMySlots] = useState<Set<string>>(new Set())
-  // 確定済み授業一覧表示
   const [showLessons, setShowLessons] = useState(false)
 
   const isInstructor = user?.id === room.instructor_id
   const thisWeekKey = getWeekKey(getThisMonday())
-  const learnerIds = members.map(m => m.learner_id)
-  // 全員のIDセット（講師 + 全生徒）
-  const allPersonIds = useMemo(() => new Set([room.instructor_id, ...learnerIds]), [room.instructor_id, learnerIds])
+  const learnerIds = useMemo(() => members.map(m => m.learner_id), [members])
+
+  // learner_id → color index マップ
+  const learnerColorIndex = useMemo(() => {
+    const map = new Map<string, number>()
+    learnerIds.forEach((id, i) => map.set(id, i))
+    return map
+  }, [learnerIds])
 
   // 今週のスロット取得
   const { data: slots = [] } = useQuery({
     queryKey: ['slots', room.id, weekKey],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('slots')
-        .select('*')
-        .eq('room_id', room.id)
-        .eq('week_key', weekKey)
+        .from('slots').select('*').eq('room_id', room.id).eq('week_key', weekKey)
       if (error) throw error
       return data as Slot[]
     },
     enabled: !!user,
   })
 
-  // サーバーのデータでローカル状態を初期化（週切り替え時・提出後にリセット）
+  // サーバーデータでローカル状態を初期化
   useEffect(() => {
     setLocalMySlots(new Set(
-      slots
-        .filter(s => s.person_id === user!.id)
-        .map(s => `${s.day_index}-${s.slot_start}`)
+      slots.filter(s => s.person_id === user!.id).map(s => `${s.day_index}-${s.slot_start}`)
     ))
   }, [slots])
 
-  // サーバー上の自分のスロット
   const myServerSlots = useMemo(
     () => new Set(slots.filter(s => s.person_id === user!.id).map(s => `${s.day_index}-${s.slot_start}`)),
     [slots, user]
   )
 
-  // 未保存の変更があるか
   const isDirty = useMemo(() => {
     if (localMySlots.size !== myServerSlots.size) return true
     for (const key of localMySlots) if (!myServerSlots.has(key)) return true
     return false
   }, [localMySlots, myServerSlots])
 
-  // 確定済み授業取得（全期間）
+  // 確定済み授業（全期間）
   const { data: allLessons = [] } = useQuery({
     queryKey: ['lessons', room.id, 'all'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('lessons').select('*').eq('room_id', room.id).eq('status', 'scheduled')
-        .order('scheduled_at', { ascending: false })
+        .order('scheduled_at')
       if (error) throw error
       return data as Lesson[]
     },
     enabled: !!user,
   })
 
-  // 完了済み授業取得（累計時間用）
+  // 完了済み授業（累計時間用）
   const { data: doneLessons = [] } = useQuery({
     queryKey: ['lessons', room.id, 'done'],
     queryFn: async () => {
@@ -138,7 +183,6 @@ export default function ScheduleTab({ room, members }: Props) {
     [allLessons, weekKey]
   )
 
-  // 累計授業時間（分）
   const totalDoneMinutes = useMemo(
     () => doneLessons.reduce((acc, l) => acc + l.duration_minutes, 0),
     [doneLessons]
@@ -150,34 +194,26 @@ export default function ScheduleTab({ room, members }: Props) {
     const key = `${dayIndex}-${slotStart}`
     setLocalMySlots(prev => {
       const next = new Set(prev)
-      if (viewMode === 'erase') {
-        next.delete(key)
-      } else {
-        if (next.has(key)) next.delete(key)
-        else next.add(key)
-      }
+      if (viewMode === 'erase') next.delete(key)
+      else if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
 
-  // 予定を提出（差分をDBに保存）
+  // 予定を提出
   const { mutate: submitSlots, isPending: isSubmitting } = useMutation({
     mutationFn: async () => {
       const mySlots = slots.filter(s => s.person_id === user!.id)
-
-      // 削除: サーバーにあってローカルにないもの
       const toDelete = mySlots
         .filter(s => !localMySlots.has(`${s.day_index}-${s.slot_start}`))
         .map(s => s.id)
-
-      // 追加: ローカルにあってサーバーにないもの
       const toAdd = [...localMySlots]
         .filter(key => !myServerSlots.has(key))
         .map(key => {
           const [dayIndex, slotStart] = key.split('-').map(Number)
           return { room_id: room.id, person_id: user!.id, week_key: weekKey, day_index: dayIndex, slot_start: slotStart }
         })
-
       if (toDelete.length > 0) {
         const { error } = await supabase.from('slots').delete().in('id', toDelete)
         if (error) throw error
@@ -190,7 +226,7 @@ export default function ScheduleTab({ room, members }: Props) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['slots', room.id, weekKey] }),
   })
 
-  // 週切り替え（未保存があれば確認）
+  // 週切り替え
   const changeWeek = (newKey: string) => {
     if (isDirty && !confirm('未保存の変更があります。破棄して週を移動しますか？')) return
     setWeekKey(newKey)
@@ -198,9 +234,10 @@ export default function ScheduleTab({ room, members }: Props) {
 
   // 授業確定
   const { mutate: confirmLesson, isPending: isConfirming } = useMutation({
-    mutationFn: async ({ dayIndex, slotStart }: { dayIndex: number; slotStart: number }) => {
+    mutationFn: async ({ dayIndex, slotStart, learnerId }: { dayIndex: number; slotStart: number; learnerId: string }) => {
       const { error } = await supabase.from('lessons').insert({
         room_id: room.id,
+        learner_id: learnerId,
         scheduled_at: toScheduledAt(weekKey, dayIndex, slotStart),
         duration_minutes: room.lesson_minutes,
         status: 'scheduled',
@@ -213,7 +250,7 @@ export default function ScheduleTab({ room, members }: Props) {
     },
   })
 
-  // スロットマップ（全員のサーバーデータ）
+  // スロットマップ（person_id → Set of keys）
   const slotsMap = useMemo(() => {
     const map = new Map<string, Set<string>>()
     for (const s of slots) {
@@ -234,50 +271,69 @@ export default function ScheduleTab({ room, members }: Props) {
     return map
   }, [lessons])
 
-  // 連続スロット判定: 授業時間分の連続コマが全員揃っているかチェック
+  // 連続スロット判定: 生徒ごとに instructor+learner の連続コマを検出
   const slotsPerLesson = room.lesson_minutes / 30
-  const overlapStartKeys = useMemo(() => {
-    const keys = new Set<string>()
-    if (allPersonIds.size < 2) return keys // 講師+生徒が揃っていない場合はスキップ
+  // Map<cellKey, overlappingLearnerIds[]>
+  const overlapStartMap = useMemo(() => {
+    const map = new Map<string, string[]>()
+    if (learnerIds.length === 0) return map
     for (let colIndex = 0; colIndex < 7; colIndex++) {
       const dayIndex = COL_TO_DAY_INDEX[colIndex]
-      for (let i = 0; i < TIME_SLOTS.length - slotsPerLesson + 1; i++) {
+      for (let i = 0; i <= TIME_SLOTS.length - slotsPerLesson; i++) {
         const startSlot = TIME_SLOTS[i]
-        // lesson_minutes分の連続スロットを全員が持っているかチェック
-        let allMatch = true
-        for (let j = 0; j < slotsPerLesson; j++) {
-          const slotStart = startSlot + j * 30
-          const key = `${dayIndex}-${slotStart}`
-          const effectivePersons = new Set(slotsMap.get(key) ?? [])
-          // 自分のローカル選択を反映
-          if (localMySlots.has(key)) effectivePersons.add(user!.id)
-          else effectivePersons.delete(user!.id)
-          // 全員（講師＋全生徒）が揃っているか
-          const hasInstructor = effectivePersons.has(room.instructor_id)
-          const hasLearner = learnerIds.some(id => effectivePersons.has(id))
-          if (!hasInstructor || !hasLearner) { allMatch = false; break }
+        for (const learnerId of learnerIds) {
+          let allMatch = true
+          for (let j = 0; j < slotsPerLesson; j++) {
+            const slotStart = startSlot + j * 30
+            const key = `${dayIndex}-${slotStart}`
+            const persons = new Set(slotsMap.get(key) ?? [])
+            if (localMySlots.has(key)) persons.add(user!.id)
+            else persons.delete(user!.id)
+            if (!persons.has(room.instructor_id) || !persons.has(learnerId)) {
+              allMatch = false; break
+            }
+          }
+          if (allMatch) {
+            const cellKey = `${dayIndex}-${startSlot}`
+            if (!map.has(cellKey)) map.set(cellKey, [])
+            if (!map.get(cellKey)!.includes(learnerId)) map.get(cellKey)!.push(learnerId)
+          }
         }
-        if (allMatch) keys.add(`${dayIndex}-${startSlot}`)
       }
     }
-    return keys
-  }, [slotsMap, localMySlots, allPersonIds, room.instructor_id, learnerIds, slotsPerLesson])
+    return map
+  }, [slotsMap, localMySlots, room.instructor_id, learnerIds, slotsPerLesson])
 
-  // セルの状態（自分はローカル状態、他者はサーバー状態を参照）
-  type CellState = 'lesson' | 'overlap' | 'mine' | 'other' | 'empty'
-  function getCellState(dayIndex: number, slotStart: number): CellState {
-    if (lessonsMap.has(`${dayIndex}-${slotStart}`)) return 'lesson'
+  // セルの背景色
+  function getCellBg(dayIndex: number, slotStart: number): string {
+    if (lessonsMap.has(`${dayIndex}-${slotStart}`)) return '#2D6A4F'
     const key = `${dayIndex}-${slotStart}`
-    const isMySlot = localMySlots.has(key)
-    const serverPersons = slotsMap.get(key) ?? new Set()
-    const effectivePersons = new Set([...serverPersons].filter(id => id !== user!.id))
-    if (isMySlot) effectivePersons.add(user!.id)
+    const serverPersons = slotsMap.get(key) ?? new Set<string>()
+    const effectivePersons = new Set([...serverPersons])
+    if (localMySlots.has(key)) effectivePersons.add(user!.id)
+    else effectivePersons.delete(user!.id)
     const hasInstructor = effectivePersons.has(room.instructor_id)
-    const hasLearner = learnerIds.some(id => effectivePersons.has(id))
-    if (hasInstructor && hasLearner) return 'overlap'
-    if (isMySlot) return 'mine'
-    if ([...serverPersons].some(id => id !== user!.id)) return 'other'
-    return 'empty'
+    const presentLearners = learnerIds.filter(id => effectivePersons.has(id))
+
+    if (isInstructor) {
+      if (hasInstructor && presentLearners.length > 0) {
+        const ci = (learnerColorIndex.get(presentLearners[0]) ?? 0) % LEARNER_COLORS.length
+        return LEARNER_COLORS[ci].active
+      }
+      if (hasInstructor) return '#D8F3DC'
+      if (presentLearners.length > 0) {
+        const ci = (learnerColorIndex.get(presentLearners[0]) ?? 0) % LEARNER_COLORS.length
+        return LEARNER_COLORS[ci].bg
+      }
+    } else {
+      const myCI = (learnerColorIndex.get(user!.id) ?? 0) % LEARNER_COLORS.length
+      const myColor = LEARNER_COLORS[myCI]
+      const isMySlot = localMySlots.has(key)
+      if (isMySlot && hasInstructor) return myColor.active
+      if (isMySlot) return myColor.bg
+      if (effectivePersons.size > 0) return '#E5E7EB'
+    }
+    return '#F3F4F6'
   }
 
   // 週ラベル
@@ -289,10 +345,13 @@ export default function ScheduleTab({ room, members }: Props) {
 
   const todayIdx = todayDayIndex()
 
+  // 授業一覧画面
   if (showLessons) {
+    const totalDoneLabel = totalDoneMinutes >= 60
+      ? `${Math.floor(totalDoneMinutes / 60)}時間${totalDoneMinutes % 60 > 0 ? `${totalDoneMinutes % 60}分` : ''}`
+      : `${totalDoneMinutes}分`
     return (
       <div className="flex flex-col">
-        {/* ヘッダー */}
         <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-gray-100">
           <button onClick={() => setShowLessons(false)} className="p-1 text-[#2D6A4F]">
             <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -301,18 +360,10 @@ export default function ScheduleTab({ room, members }: Props) {
           </button>
           <h2 className="text-base font-bold text-[#1B1B1B]">確定した授業</h2>
         </div>
-
-        {/* 累計時間 */}
         <div className="bg-[#F7F9F7] mx-4 mt-4 rounded-2xl p-4 flex items-center justify-between">
-          <p className="text-sm text-[#6B7280]">これまでの累計授業時間</p>
-          <p className="text-base font-bold text-[#2D6A4F]">
-            {totalDoneMinutes >= 60
-              ? `${Math.floor(totalDoneMinutes / 60)}時間${totalDoneMinutes % 60 > 0 ? `${totalDoneMinutes % 60}分` : ''}`
-              : `${totalDoneMinutes}分`}
-          </p>
+          <p className="text-sm text-[#6B7280]">累計授業時間</p>
+          <p className="text-base font-bold text-[#2D6A4F]">{totalDoneMinutes > 0 ? totalDoneLabel : '—'}</p>
         </div>
-
-        {/* 授業一覧 */}
         <div className="px-4 py-4 space-y-3 overflow-y-auto" style={{ maxHeight: 'calc(100svh - 280px)' }}>
           {allLessons.length === 0 ? (
             <p className="text-sm text-[#6B7280] text-center py-8">確定した授業はありません</p>
@@ -322,12 +373,20 @@ export default function ScheduleTab({ room, members }: Props) {
               const endMin = d.getHours() * 60 + d.getMinutes() + lesson.duration_minutes
               const dateStr = `${d.getMonth() + 1}月${d.getDate()}日(${['日','月','火','水','木','金','土'][d.getDay()]})`
               const timeStr = `${minutesToTime(d.getHours() * 60 + d.getMinutes())} 〜 ${minutesToTime(endMin)}`
+              const learnerMember = lesson.learner_id ? members.find(m => m.learner_id === lesson.learner_id) : null
+              const ci = lesson.learner_id ? (learnerColorIndex.get(lesson.learner_id) ?? 0) % LEARNER_COLORS.length : 0
               return (
                 <div key={lesson.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
-                  <div className="w-2 h-2 rounded-full bg-[#2D6A4F] shrink-0 mt-1" />
+                  <div
+                    className="w-2 h-2 rounded-full shrink-0 mt-1"
+                    style={{ background: learnerMember ? LEARNER_COLORS[ci].active : '#2D6A4F' }}
+                  />
                   <div>
                     <p className="text-sm font-medium text-[#1B1B1B]">{dateStr}</p>
                     <p className="text-xs text-[#6B7280]">{timeStr}（{lesson.duration_minutes}分）</p>
+                    {learnerMember && (
+                      <p className="text-xs mt-0.5" style={{ color: LEARNER_COLORS[ci].active }}>{learnerMember.display_name}</p>
+                    )}
                   </div>
                 </div>
               )
@@ -364,9 +423,7 @@ export default function ScheduleTab({ room, members }: Props) {
             key={mode}
             onClick={() => setViewMode(mode)}
             className={`flex-1 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-              viewMode === mode
-                ? 'bg-[#2D6A4F] text-white'
-                : 'bg-[#F3F4F6] text-[#6B7280]'
+              viewMode === mode ? 'bg-[#2D6A4F] text-white' : 'bg-[#F3F4F6] text-[#6B7280]'
             }`}
           >
             {mode === 'input' ? '入力' : mode === 'erase' ? '消去' : '閲覧'}
@@ -375,8 +432,8 @@ export default function ScheduleTab({ room, members }: Props) {
       </div>
 
       {/* カレンダーグリッド */}
-      <div className="overflow-y-auto" style={{ maxHeight: 'calc(100svh - 380px)' }}>
-        {/* 曜日ヘッダー（sticky） */}
+      <div className="overflow-y-auto" style={{ maxHeight: 'calc(100svh - 400px)' }}>
+        {/* 曜日ヘッダー */}
         <div
           className="sticky top-0 bg-white z-10 border-b border-gray-200"
           style={{ display: 'grid', gridTemplateColumns: '36px repeat(7, 1fr)' }}
@@ -402,34 +459,49 @@ export default function ScheduleTab({ room, members }: Props) {
             <div className="text-right pr-1 border-r border-gray-100 flex items-center justify-end">
               <span className="text-[10px] text-[#9CA3AF]">{minutesToTime(slotStart)}</span>
             </div>
-            {COL_TO_DAY_INDEX.map((dayIndex) => {
-              const state = getCellState(dayIndex, slotStart)
-              // 連続スロット開始位置の判定
-              const isOverlapStart = overlapStartKeys.has(`${dayIndex}-${slotStart}`)
-              const cellBg =
-                state === 'lesson' ? 'bg-[#2D6A4F]' :
-                state === 'overlap' ? 'bg-[#52B788]' :
-                state === 'mine' ? 'bg-[#D8F3DC]' :
-                state === 'other' ? 'bg-[#E5E7EB]' :
-                'bg-[#F3F4F6]'
+            {COL_TO_DAY_INDEX.map(dayIndex => {
+              const isLesson = lessonsMap.has(`${dayIndex}-${slotStart}`)
+              const bg = getCellBg(dayIndex, slotStart)
+              const overlapLearners = overlapStartMap.get(`${dayIndex}-${slotStart}`) ?? []
+              const canConfirm = isInstructor && overlapLearners.length > 0
               return (
                 <button
                   key={dayIndex}
                   onClick={() => {
-                    if (state === 'lesson') return
-                    if (state === 'overlap' && isInstructor && isOverlapStart) {
-                      setConfirmingSlot({ dayIndex, slotStart })
+                    if (isLesson) return
+                    if (canConfirm) {
+                      setConfirmingSlot({ dayIndex, slotStart, learnerIds: overlapLearners })
                     } else if (viewMode !== 'view') {
                       toggleLocalSlot(dayIndex, slotStart)
                     }
                   }}
-                  className={`h-9 border border-white ${cellBg} transition-colors active:opacity-70 relative`}
+                  className="h-9 border border-white transition-colors active:opacity-70 relative"
+                  style={{ backgroundColor: bg }}
                 >
-                  {isOverlapStart && isInstructor && (
-                    <span className="absolute inset-x-0 top-0.5 flex justify-center">
-                      <span className="w-1.5 h-1.5 rounded-full bg-white opacity-80" />
+                  {/* 連続スロット開始マーク */}
+                  {canConfirm && (
+                    <span className="absolute inset-x-0 top-0.5 flex justify-center gap-0.5">
+                      {overlapLearners.slice(0, 3).map(lid => (
+                        <span
+                          key={lid}
+                          className="w-1.5 h-1.5 rounded-full"
+                          style={{ background: '#fff', opacity: 0.9 }}
+                        />
+                      ))}
                     </span>
                   )}
+                  {/* 確定済み授業の生徒ドット */}
+                  {isLesson && (() => {
+                    const lesson = lessonsMap.get(`${dayIndex}-${slotStart}`)!
+                    if (!lesson.learner_id) return null
+                    const ci = (learnerColorIndex.get(lesson.learner_id) ?? 0) % LEARNER_COLORS.length
+                    return (
+                      <span
+                        className="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 rounded-full"
+                        style={{ background: LEARNER_COLORS[ci].bg }}
+                      />
+                    )
+                  })()}
                 </button>
               )
             })}
@@ -437,11 +509,26 @@ export default function ScheduleTab({ room, members }: Props) {
         ))}
       </div>
 
-      {/* 凡例 + 提出ボタン */}
+      {/* 凡例 + ボタン */}
       <div className="bg-white border-t border-gray-100 px-4 py-3 space-y-3">
+        {/* 生徒の色凡例 */}
+        {members.length > 0 && (
+          <div className="flex flex-wrap gap-x-3 gap-y-1 justify-center">
+            {members.map((m, i) => {
+              const ci = i % LEARNER_COLORS.length
+              return (
+                <span key={m.id} className="flex items-center gap-1 text-[10px] text-[#6B7280]">
+                  <span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: LEARNER_COLORS[ci].active }} />
+                  {m.display_name}
+                </span>
+              )
+            })}
+          </div>
+        )}
+        {/* 状態凡例 */}
         <div className="flex gap-3 justify-center text-[10px] text-[#6B7280]">
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-[#D8F3DC] inline-block" />自分の空き</span>
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-[#52B788] inline-block" />調整可能</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: LEARNER_COLORS[0].active }} />調整可能</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-[#2D6A4F] inline-block" />授業確定</span>
         </div>
         <div className="flex gap-2">
@@ -460,7 +547,7 @@ export default function ScheduleTab({ room, members }: Props) {
           </button>
         </div>
         {isInstructor && (
-          <p className="text-center text-xs text-[#52B788]">調整可能なコマ（●マーク）をタップして授業を確定できます</p>
+          <p className="text-center text-xs text-[#52B788]">●マークのコマをタップして授業を確定できます</p>
         )}
       </div>
 
@@ -471,7 +558,13 @@ export default function ScheduleTab({ room, members }: Props) {
           slotStart={confirmingSlot.slotStart}
           lessonMinutes={room.lesson_minutes}
           isConfirming={isConfirming}
-          onConfirm={() => confirmLesson(confirmingSlot)}
+          overlappingLearnerIds={confirmingSlot.learnerIds}
+          members={members}
+          onConfirm={(learnerId) => confirmLesson({
+            dayIndex: confirmingSlot.dayIndex,
+            slotStart: confirmingSlot.slotStart,
+            learnerId,
+          })}
           onClose={() => setConfirmingSlot(null)}
         />
       )}

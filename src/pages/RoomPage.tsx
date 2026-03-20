@@ -302,7 +302,12 @@ export default function RoomPage() {
           })()}
 
           {/* 確定済み授業一覧 */}
-          {scheduledLessons.length > 0 && (
+          {scheduledLessons.length > 0 && (() => {
+            const COLORS = [
+              '#3B82F6','#CA8A04','#DB2777','#7C3AED','#EA580C',
+            ]
+            const learnerIdList = members.map(m => m.learner_id)
+            return (
             <div>
               <h2 className="text-sm font-bold text-[#6B7280] mb-3">確定済み授業 ({scheduledLessons.length})</h2>
               <div className="space-y-2">
@@ -310,9 +315,12 @@ export default function RoomPage() {
                   const d = new Date(l.scheduled_at)
                   const days = ['日', '月', '火', '水', '木', '金', '土']
                   const endMin = d.getHours() * 60 + d.getMinutes() + l.duration_minutes
+                  const learnerMember = l.learner_id ? members.find(m => m.learner_id === l.learner_id) : null
+                  const ci = l.learner_id ? learnerIdList.indexOf(l.learner_id) % COLORS.length : 0
+                  const dotColor = learnerMember ? COLORS[ci < 0 ? 0 : ci] : '#2D6A4F'
                   return (
                     <div key={l.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
-                      <div className="w-2 h-2 rounded-full bg-[#2D6A4F] shrink-0" />
+                      <div className="w-2 h-2 rounded-full shrink-0" style={{ background: dotColor }} />
                       <div>
                         <p className="text-sm font-medium text-[#1B1B1B]">
                           {d.getMonth() + 1}月{d.getDate()}日({days[d.getDay()]})
@@ -320,13 +328,17 @@ export default function RoomPage() {
                         <p className="text-xs text-[#6B7280]">
                           {minutesToTime(d.getHours() * 60 + d.getMinutes())} 〜 {minutesToTime(endMin)}
                         </p>
+                        {learnerMember && (
+                          <p className="text-xs font-medium mt-0.5" style={{ color: dotColor }}>{learnerMember.display_name}</p>
+                        )}
                       </div>
                     </div>
                   )
                 })}
               </div>
             </div>
-          )}
+            )
+          })()}
 
           {/* メンバー一覧 */}
           <div>
