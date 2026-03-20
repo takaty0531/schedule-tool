@@ -24,8 +24,7 @@ function CreateRoomModal({ onClose }: { onClose: () => void }) {
       if (error) throw error
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['rooms', 'instructor'] })
-      queryClient.invalidateQueries({ queryKey: ['rooms', 'member'] })
+      queryClient.refetchQueries({ queryKey: ['rooms', 'instructor'] })
       onClose()
     },
   })
@@ -79,22 +78,23 @@ function CreateRoomModal({ onClose }: { onClose: () => void }) {
 }
 
 export default function DashboardPage() {
-  const { profile } = useAuth()
+  const { profile, user } = useAuth()
   const navigate = useNavigate()
   const [showCreate, setShowCreate] = useState(false)
 
   // 講師: 自分が作ったルーム一覧
-  const { data: instructorRooms = [] } = useQuery({
-    queryKey: ['rooms', 'instructor'],
+  const { data: instructorRooms = [], error: roomsError } = useQuery({
+    queryKey: ['rooms', 'instructor', user?.id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('rooms')
         .select('*')
+        .eq('instructor_id', user!.id)
         .order('created_at', { ascending: false })
       if (error) throw error
       return data as Room[]
     },
-    enabled: profile?.role === 'instructor',
+    enabled: profile?.role === 'instructor' && !!user,
   })
 
   // 生徒・保護者: 参加しているルーム一覧
@@ -141,6 +141,11 @@ export default function DashboardPage() {
             </svg>
             ルームを作成
           </button>
+        )}
+
+        {/* クエリエラー表示 */}
+        {roomsError && (
+          <p className="text-red-500 text-sm text-center">{(roomsError as Error).message}</p>
         )}
 
         {/* ルーム一覧 */}
