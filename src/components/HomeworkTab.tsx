@@ -107,9 +107,11 @@ function HomeworkModal({
         </div>
 
         {/* 授業割り当て */}
-        {lessons.length > 0 && (
-          <div>
-            <label className="block text-sm font-medium text-[#1B1B1B] mb-1">授業日程（任意）</label>
+        <div>
+          <label className="block text-sm font-medium text-[#1B1B1B] mb-1">授業日程（任意）</label>
+          {lessons.length === 0 ? (
+            <p className="text-xs text-[#9CA3AF] py-2">確定した授業がありません（スケジュールタブで授業を確定してください）</p>
+          ) : (
             <select
               value={lessonId}
               onChange={e => setLessonId(e.target.value)}
@@ -120,8 +122,8 @@ function HomeworkModal({
                 <option key={l.id} value={l.id}>{lessonLabel(l)}</option>
               ))}
             </select>
-          </div>
-        )}
+          )}
+        </div>
 
         <button
           onClick={() => mutate()}
