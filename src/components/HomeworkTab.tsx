@@ -109,10 +109,10 @@ function HomeworkModal({
   })
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50 pb-6" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 z-50" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl w-full max-w-lg p-6 space-y-4 overflow-y-auto"
-        style={{ maxHeight: '85dvh', paddingBottom: 'max(2rem, env(safe-area-inset-bottom))' }}
+        className="fixed bottom-6 left-4 right-4 max-w-lg mx-auto bg-white rounded-2xl p-6 space-y-4 overflow-y-auto"
+        style={{ maxHeight: 'calc(100dvh - 5rem)' }}
         onClick={e => e.stopPropagation()}
       >
         <h2 className="text-lg font-bold text-[#1B1B1B]">{editing ? '宿題を編集' : '宿題を追加'}</h2>
@@ -367,10 +367,10 @@ function HomeworkDetailModal({
   }
 
   return (
-    <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50 pb-6" onClick={onClose}>
+    <div className="fixed inset-0 bg-black/40 z-50" onClick={onClose}>
       <div
-        className="bg-white rounded-2xl w-full max-w-lg p-6 space-y-4 overflow-y-auto"
-        style={{ maxHeight: '85dvh', paddingBottom: 'max(2rem, env(safe-area-inset-bottom))' }}
+        className="fixed bottom-6 left-4 right-4 max-w-lg mx-auto bg-white rounded-2xl p-6 space-y-4 overflow-y-auto"
+        style={{ maxHeight: 'calc(100dvh - 5rem)' }}
         onClick={e => e.stopPropagation()}
       >
         <div className="flex items-start justify-between">
