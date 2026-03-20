@@ -16,6 +16,7 @@ export type Room = {
   name: string
   instructor_id: string
   lesson_minutes: number
+  description: string | null
   created_at: string
 }
 
@@ -78,6 +79,27 @@ export type LessonFile = {
   file_type: 'homework' | 'material'
   file_path: string
   file_name: string
+  created_at: string
+}
+
+export type StudyPlanItem = {
+  id: string
+  room_id: string
+  subject: string
+  title: string
+  parent_id: string | null
+  lesson_id: string | null
+  order_index: number
+  created_at: string
+}
+
+export type Homework = {
+  id: string
+  room_id: string
+  lesson_id: string | null
+  title: string
+  description: string | null
+  reference_text: string | null
   created_at: string
 }
 

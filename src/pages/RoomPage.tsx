@@ -6,9 +6,12 @@ import { useAuth } from '../lib/auth'
 import BottomNav from '../components/BottomNav'
 import Avatar from '../components/Avatar'
 import ScheduleTab from '../components/ScheduleTab'
-import type { Room, RoomMember, Profile, Invitation } from '../types/database'
+import StudyPlanTab from '../components/StudyPlanTab'
+import HomeworkTab from '../components/HomeworkTab'
+import type { Room, RoomMember, Profile, Invitation, Lesson } from '../types/database'
+import { minutesToTime } from '../lib/scheduleUtils'
 
-type Tab = 'members' | 'schedule'
+type Tab = 'detail' | 'schedule' | 'study_plan' | 'homework'
 
 // トークン生成
 function generateToken() {
@@ -140,7 +143,7 @@ export default function RoomPage() {
   const navigate = useNavigate()
   const { profile } = useAuth()
   const [showInvite, setShowInvite] = useState(false)
-  const [activeTab, setActiveTab] = useState<Tab>('members')
+  const [activeTab, setActiveTab] = useState<Tab>('detail')
 
   // ルーム情報
   const { data: room } = useQuery({
@@ -162,6 +165,29 @@ export default function RoomPage() {
         .eq('room_id', id!)
       if (error) throw error
       return data as (RoomMember & { profile: Profile })[]
+    },
+  })
+
+  // 確定済み授業
+  const { data: scheduledLessons = [] } = useQuery({
+    queryKey: ['lessons_scheduled', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('lessons').select('*').eq('room_id', id!).eq('status', 'scheduled')
+        .order('scheduled_at')
+      if (error) throw error
+      return data as Lesson[]
+    },
+  })
+
+  // 完了済み授業（累計時間）
+  const { data: doneLessons = [] } = useQuery({
+    queryKey: ['lessons_done', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('lessons').select('*').eq('room_id', id!).eq('status', 'done')
+      if (error) throw error
+      return data as Lesson[]
     },
   })
 
@@ -199,81 +225,163 @@ export default function RoomPage() {
       </div>
 
       {/* タブ */}
-      <div className="bg-white border-b border-gray-200 flex">
-        {(['members', 'schedule'] as Tab[]).map(tab => (
+      <div className="bg-white border-b border-gray-200 flex overflow-x-auto">
+        {(['detail', 'schedule', 'study_plan', 'homework'] as Tab[]).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-3 text-sm font-medium transition-colors border-b-2 ${
+            className={`flex-shrink-0 px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
               activeTab === tab
                 ? 'border-[#2D6A4F] text-[#2D6A4F]'
                 : 'border-transparent text-[#6B7280]'
             }`}
           >
-            {tab === 'members' ? 'メンバー' : 'スケジュール'}
+            {tab === 'detail' ? '詳細' : tab === 'schedule' ? 'スケジュール' : tab === 'study_plan' ? '学習計画' : '宿題'}
           </button>
         ))}
       </div>
 
-      {activeTab === 'schedule' ? (
+      {activeTab === 'schedule' && (
         <div className="max-w-lg mx-auto">
           <ScheduleTab room={room} members={members} />
         </div>
-      ) : (
-      <div className="max-w-lg mx-auto px-4 py-6 space-y-5">
-        {/* 招待ボタン（講師のみ） */}
-        {profile?.role === 'instructor' && (
-          <button
-            onClick={() => setShowInvite(true)}
-            className="w-full border-2 border-dashed border-[#52B788] text-[#2D6A4F] font-bold py-3 rounded-2xl flex items-center justify-center gap-2"
-          >
-            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-            </svg>
-            生徒・保護者を招待
-          </button>
-        )}
-
-        {/* メンバー一覧 */}
-        <div>
-          <h2 className="text-sm font-bold text-[#6B7280] mb-3">メンバー ({members.length})</h2>
-          {members.length === 0 ? (
-            <p className="text-sm text-[#6B7280] text-center py-4">まだメンバーがいません</p>
-          ) : (
-            <div className="space-y-2">
-              {members.map(m => (
-                <div key={m.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
-                  <Avatar avatarUrl={m.profile.avatar_url} displayName={m.display_name} size={40} />
-                  <div>
-                    <p className="font-medium text-[#1B1B1B]">{m.display_name}</p>
-                    <p className="text-xs text-[#6B7280]">生徒</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+      )}
+      {activeTab === 'study_plan' && (
+        <div className="max-w-lg mx-auto">
+          <StudyPlanTab room={room} />
         </div>
+      )}
+      {activeTab === 'homework' && (
+        <div className="max-w-lg mx-auto">
+          <HomeworkTab room={room} />
+        </div>
+      )}
+      {activeTab === 'detail' && (() => {
+        const totalDoneMin = doneLessons.reduce((acc, l) => acc + l.duration_minutes, 0)
+        const totalDoneLabel = totalDoneMin >= 60
+          ? `${Math.floor(totalDoneMin / 60)}時間${totalDoneMin % 60 > 0 ? `${totalDoneMin % 60}分` : ''}`
+          : `${totalDoneMin}分`
+        return (
+        <div className="max-w-lg mx-auto px-4 py-6 space-y-5">
 
-        {/* 招待中（未承認）一覧 */}
-        {profile?.role === 'instructor' && invitations.length > 0 && (
-          <div>
-            <h2 className="text-sm font-bold text-[#6B7280] mb-3">招待中 ({invitations.length})</h2>
-            <div className="space-y-2">
-              {invitations.map(inv => (
-                <div key={inv.id} className="bg-white rounded-2xl p-4 flex items-center justify-between">
-                  <div>
-                    <p className="font-medium text-[#1B1B1B]">{inv.display_name}</p>
-                    <p className="text-xs text-[#6B7280]">{inv.role === 'learner' ? '生徒' : '保護者'} • 招待中</p>
-                  </div>
-                  <span className="text-xs bg-[#D8F3DC] text-[#2D6A4F] px-2 py-1 rounded-full">pending</span>
-                </div>
-              ))}
+          {/* 統計カード */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="bg-white rounded-2xl p-4 text-center">
+              <p className="text-2xl font-bold text-[#2D6A4F]">{scheduledLessons.length}</p>
+              <p className="text-xs text-[#6B7280] mt-1">予定授業数</p>
+            </div>
+            <div className="bg-white rounded-2xl p-4 text-center">
+              <p className="text-2xl font-bold text-[#2D6A4F]">{totalDoneMin > 0 ? totalDoneLabel : '—'}</p>
+              <p className="text-xs text-[#6B7280] mt-1">累計授業時間</p>
             </div>
           </div>
-        )}
 
-      </div>
-      )}
+          {/* ルーム説明 */}
+          {room.description && (
+            <div className="bg-white rounded-2xl p-4">
+              <h2 className="text-sm font-bold text-[#6B7280] mb-2">説明</h2>
+              <p className="text-sm text-[#1B1B1B] whitespace-pre-wrap">{room.description}</p>
+            </div>
+          )}
+
+          {/* 次回の授業 */}
+          {scheduledLessons.length > 0 && (() => {
+            const next = scheduledLessons[0]
+            const d = new Date(next.scheduled_at)
+            const days = ['日', '月', '火', '水', '木', '金', '土']
+            const endMin = d.getHours() * 60 + d.getMinutes() + next.duration_minutes
+            return (
+              <div className="bg-[#2D6A4F] rounded-2xl p-4 text-white">
+                <p className="text-xs opacity-75 mb-1">次回の授業</p>
+                <p className="font-bold">{d.getMonth() + 1}月{d.getDate()}日({days[d.getDay()]})</p>
+                <p className="text-sm opacity-90 mt-0.5">
+                  {minutesToTime(d.getHours() * 60 + d.getMinutes())} 〜 {minutesToTime(endMin)}（{next.duration_minutes}分）
+                </p>
+              </div>
+            )
+          })()}
+
+          {/* 確定済み授業一覧 */}
+          {scheduledLessons.length > 0 && (
+            <div>
+              <h2 className="text-sm font-bold text-[#6B7280] mb-3">確定済み授業 ({scheduledLessons.length})</h2>
+              <div className="space-y-2">
+                {scheduledLessons.map(l => {
+                  const d = new Date(l.scheduled_at)
+                  const days = ['日', '月', '火', '水', '木', '金', '土']
+                  const endMin = d.getHours() * 60 + d.getMinutes() + l.duration_minutes
+                  return (
+                    <div key={l.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
+                      <div className="w-2 h-2 rounded-full bg-[#2D6A4F] shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium text-[#1B1B1B]">
+                          {d.getMonth() + 1}月{d.getDate()}日({days[d.getDay()]})
+                        </p>
+                        <p className="text-xs text-[#6B7280]">
+                          {minutesToTime(d.getHours() * 60 + d.getMinutes())} 〜 {minutesToTime(endMin)}
+                        </p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* メンバー一覧 */}
+          <div>
+            <h2 className="text-sm font-bold text-[#6B7280] mb-3">メンバー ({members.length})</h2>
+            {members.length === 0 ? (
+              <p className="text-sm text-[#6B7280] text-center py-4">まだメンバーがいません</p>
+            ) : (
+              <div className="space-y-2">
+                {members.map(m => (
+                  <div key={m.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
+                    <Avatar avatarUrl={m.profile.avatar_url} displayName={m.display_name} size={40} />
+                    <div>
+                      <p className="font-medium text-[#1B1B1B]">{m.display_name}</p>
+                      <p className="text-xs text-[#6B7280]">生徒</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 招待中（未承認）一覧 */}
+          {profile?.role === 'instructor' && invitations.length > 0 && (
+            <div>
+              <h2 className="text-sm font-bold text-[#6B7280] mb-3">招待中 ({invitations.length})</h2>
+              <div className="space-y-2">
+                {invitations.map(inv => (
+                  <div key={inv.id} className="bg-white rounded-2xl p-4 flex items-center justify-between">
+                    <div>
+                      <p className="font-medium text-[#1B1B1B]">{inv.display_name}</p>
+                      <p className="text-xs text-[#6B7280]">{inv.role === 'learner' ? '生徒' : '保護者'} • 招待中</p>
+                    </div>
+                    <span className="text-xs bg-[#D8F3DC] text-[#2D6A4F] px-2 py-1 rounded-full">pending</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 招待ボタン（講師のみ） */}
+          {profile?.role === 'instructor' && (
+            <button
+              onClick={() => setShowInvite(true)}
+              className="w-full border-2 border-dashed border-[#52B788] text-[#2D6A4F] font-bold py-3 rounded-2xl flex items-center justify-center gap-2"
+            >
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              生徒・保護者を招待
+            </button>
+          )}
+
+        </div>
+        )
+      })()}
 
       {showInvite && room && (
         <InviteModal room={room} members={members} onClose={() => setShowInvite(false)} />
