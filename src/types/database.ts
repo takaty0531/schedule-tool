@@ -107,6 +107,15 @@ export type Homework = {
   created_at: string
 }
 
+export type HomeworkFile = {
+  id: string
+  homework_id: string
+  uploader_id: string
+  file_path: string
+  file_name: string
+  created_at: string
+}
+
 export type NotificationSetting = {
   id: string
   user_id: string

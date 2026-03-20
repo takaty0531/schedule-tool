@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
-import type { Room, Homework, Lesson } from '../types/database'
+import type { Room, Homework, Lesson, HomeworkFile } from '../types/database'
 import { minutesToTime } from '../lib/scheduleUtils'
 
 type Props = { room: Room }
@@ -52,7 +52,6 @@ function HomeworkModal({
   const [description, setDescription] = useState(editing?.description ?? '')
   const [referenceText, setReferenceText] = useState(editing?.reference_text ?? '')
   const [lessonId, setLessonId] = useState(editing?.lesson_id ?? '')
-  // 提出日
   const [dueType, setDueType] = useState<'lesson' | 'next_lesson' | 'custom' | ''>(editing?.due_type ?? '')
   const [dueLessonId, setDueLessonId] = useState(editing?.due_lesson_id ?? '')
   const [dueDate, setDueDate] = useState(editing?.due_date ?? '')
@@ -148,7 +147,6 @@ function HomeworkModal({
             ))}
           </div>
 
-          {/* 授業日指定 */}
           {dueType === 'lesson' && (
             <div className="mt-2">
               {lessons.length === 0 ? (
@@ -168,7 +166,6 @@ function HomeworkModal({
             </div>
           )}
 
-          {/* 日付自由入力 */}
           {dueType === 'custom' && (
             <input
               type="date"
@@ -192,9 +189,9 @@ function HomeworkModal({
           />
         </div>
 
-        {/* 参考資料 */}
+        {/* 参考資料（テキスト） */}
         <div>
-          <label className="block text-sm font-medium text-[#1B1B1B] mb-1">参考資料（任意）</label>
+          <label className="block text-sm font-medium text-[#1B1B1B] mb-1">参考資料テキスト（任意）</label>
           <textarea
             value={referenceText}
             onChange={e => setReferenceText(e.target.value)}
@@ -236,9 +233,75 @@ function HomeworkDetailModal({
   onDelete: () => void
   onClose: () => void
 }) {
+  const { user } = useAuth()
+  const queryClient = useQueryClient()
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+
+  // ファイル一覧
+  const { data: files = [] } = useQuery({
+    queryKey: ['homework_files', hw.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('homework_files').select('*').eq('homework_id', hw.id).order('created_at')
+      if (error) throw error
+      return data as HomeworkFile[]
+    },
+  })
+
+  // ファイルアップロード
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !user) return
+    setUploading(true)
+    try {
+      const ext = file.name.split('.').pop()
+      const filePath = `homework/${hw.id}/${Date.now()}.${ext}`
+      const { error: uploadError } = await supabase.storage.from('lessons').upload(filePath, file)
+      if (uploadError) throw uploadError
+      const { error: dbError } = await supabase.from('homework_files').insert({
+        homework_id: hw.id,
+        uploader_id: user.id,
+        file_path: filePath,
+        file_name: file.name,
+      })
+      if (dbError) throw dbError
+      queryClient.invalidateQueries({ queryKey: ['homework_files', hw.id] })
+      queryClient.invalidateQueries({ queryKey: ['homework_file_counts', hw.id] })
+    } catch {
+      alert('アップロードに失敗しました')
+    } finally {
+      setUploading(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  // ファイル削除
+  const { mutate: deleteFile } = useMutation({
+    mutationFn: async ({ fileId, filePath }: { fileId: string; filePath: string }) => {
+      await supabase.storage.from('lessons').remove([filePath])
+      const { error } = await supabase.from('homework_files').delete().eq('id', fileId)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['homework_files', hw.id] })
+      queryClient.invalidateQueries({ queryKey: ['homework_file_counts', hw.id] })
+    },
+  })
+
+  // ファイルダウンロード
+  const openFile = async (filePath: string) => {
+    const { data } = await supabase.storage.from('lessons').createSignedUrl(filePath, 60)
+    if (data?.signedUrl) window.open(data.signedUrl, '_blank')
+  }
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-t-3xl w-full max-w-lg p-6 space-y-4" onClick={e => e.stopPropagation()}>
+      <div
+        className="bg-white rounded-t-3xl w-full max-w-lg p-6 space-y-4 overflow-y-auto"
+        style={{ maxHeight: '90svh' }}
+        onClick={e => e.stopPropagation()}
+      >
         <div className="flex items-start justify-between">
           <h2 className="text-lg font-bold text-[#1B1B1B] flex-1 pr-2">{hw.title}</h2>
           {isInstructor && (
@@ -273,10 +336,69 @@ function HomeworkDetailModal({
 
         {hw.reference_text && (
           <div className="bg-[#F7F9F7] rounded-xl p-4">
-            <p className="text-xs font-medium text-[#6B7280] mb-1">参考資料</p>
+            <p className="text-xs font-medium text-[#6B7280] mb-1">参考資料テキスト</p>
             <p className="text-sm text-[#1B1B1B] whitespace-pre-wrap break-all">{hw.reference_text}</p>
           </div>
         )}
+
+        {/* 参考資料ファイル */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-bold text-[#1B1B1B]">参考資料ファイル</p>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              className="text-xs text-[#52B788] font-medium px-3 py-1.5 rounded-lg bg-[#F0FDF4]"
+            >
+              {uploading ? 'アップロード中...' : '＋ 追加'}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={handleFileUpload}
+              accept="image/*,.pdf,.doc,.docx,.xlsx,.pptx"
+            />
+          </div>
+
+          {files.length === 0 ? (
+            <p className="text-xs text-[#9CA3AF] text-center py-2">ファイルはありません</p>
+          ) : (
+            <div className="space-y-2">
+              {files.map(f => (
+                <div key={f.id} className="flex items-center gap-3 p-3 bg-[#F7F9F7] rounded-xl">
+                  <div className="w-8 h-8 rounded-lg bg-[#D8F3DC] flex items-center justify-center shrink-0">
+                    {f.file_name.match(/\.(jpg|jpeg|png|gif|webp)$/i) ? (
+                      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#2D6A4F" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                    ) : (
+                      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#2D6A4F" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                      </svg>
+                    )}
+                  </div>
+                  <button
+                    onClick={() => openFile(f.file_path)}
+                    className="flex-1 text-left text-sm text-[#1B1B1B] truncate"
+                  >
+                    {f.file_name}
+                  </button>
+                  {(isInstructor || f.uploader_id === user?.id) && (
+                    <button
+                      onClick={() => confirm('削除しますか？') && deleteFile({ fileId: f.id, filePath: f.file_path })}
+                      className="text-[#D1D5DB] p-1 shrink-0"
+                    >
+                      <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         <button onClick={onClose} className="w-full text-sm text-[#6B7280] py-2">閉じる</button>
       </div>
@@ -316,6 +438,25 @@ export default function HomeworkTab({ room }: Props) {
     enabled: !!user,
   })
 
+  // 各宿題のファイル数をまとめて取得
+  const { data: fileCounts = {} } = useQuery({
+    queryKey: ['homework_file_counts', room.id, homeworkList.map(h => h.id).join(',')],
+    queryFn: async () => {
+      if (homeworkList.length === 0) return {}
+      const { data, error } = await supabase
+        .from('homework_files')
+        .select('homework_id')
+        .in('homework_id', homeworkList.map(h => h.id))
+      if (error) throw error
+      const counts: Record<string, number> = {}
+      for (const row of data) {
+        counts[row.homework_id] = (counts[row.homework_id] ?? 0) + 1
+      }
+      return counts
+    },
+    enabled: homeworkList.length > 0,
+  })
+
   const lessonsMap = useMemo(() => new Map(lessons.map(l => [l.id, l])), [lessons])
 
   const { mutate: deleteHw } = useMutation({
@@ -341,6 +482,7 @@ export default function HomeworkTab({ room }: Props) {
         {homeworkList.map(hw => {
           const lesson = hw.lesson_id ? lessonsMap.get(hw.lesson_id) ?? null : null
           const dueLabel = dueDateLabel(hw, lessonsMap)
+          const fileCount = fileCounts[hw.id] ?? 0
           return (
             <button
               key={hw.id}
@@ -357,8 +499,20 @@ export default function HomeworkTab({ room }: Props) {
               {hw.description && (
                 <p className="text-xs text-[#6B7280] line-clamp-2">{hw.description}</p>
               )}
-              {hw.reference_text && (
-                <p className="text-xs text-[#9CA3AF]">参考資料あり</p>
+              {(hw.reference_text || fileCount > 0) && (
+                <div className="flex items-center gap-2">
+                  {hw.reference_text && (
+                    <span className="text-xs text-[#9CA3AF]">テキストあり</span>
+                  )}
+                  {fileCount > 0 && (
+                    <span className="text-xs text-[#52B788] flex items-center gap-1">
+                      <svg width="11" height="11" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      {fileCount}件
+                    </span>
+                  )}
+                </div>
               )}
             </button>
           )
