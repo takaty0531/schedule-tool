@@ -38,7 +38,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        // サーバーに問い合わせてユーザーが実際に存在するか確認
+        const { error } = await supabase.auth.getUser()
+        if (error) {
+          // ユーザーが削除済みなどでトークンが無効 → 強制サインアウト
+          await supabase.auth.signOut()
+          setLoading(false)
+          return
+        }
+      }
       setSession(session)
       if (session?.user) fetchProfile(session.user.id).finally(() => setLoading(false))
       else setLoading(false)
