@@ -7,6 +7,8 @@ import DashboardPage from './pages/DashboardPage'
 import RoomPage from './pages/RoomPage'
 import InvitePage from './pages/InvitePage'
 import SettingsPage from './pages/SettingsPage'
+import ForgotPasswordPage from './pages/ForgotPasswordPage'
+import ResetPasswordPage from './pages/ResetPasswordPage'
 import RoleSelectPage from './pages/setup/RoleSelectPage'
 import ProfileSetupPage from './pages/setup/ProfileSetupPage'
 
@@ -38,6 +40,8 @@ function AppRoutes() {
       <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
       <Route path="/room/:id" element={<PrivateRoute><RoomPage /></PrivateRoute>} />
       <Route path="/invite/:token" element={<InvitePage />} />
+      <Route path="/forgot-password" element={<PublicRoute><ForgotPasswordPage /></PublicRoute>} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/settings" element={<PrivateRoute><SettingsPage /></PrivateRoute>} />
     </Routes>
   )
