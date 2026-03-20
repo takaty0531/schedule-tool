@@ -168,6 +168,18 @@ export default function RoomPage() {
     },
   })
 
+  // 講師プロフィール
+  const { data: instructorProfile } = useQuery({
+    queryKey: ['instructor_profile', room?.instructor_id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('profiles').select('*').eq('id', room!.instructor_id).single()
+      if (error) throw error
+      return data as Profile
+    },
+    enabled: !!room?.instructor_id,
+  })
+
   // 確定済み授業
   const { data: scheduledLessons = [] } = useQuery({
     queryKey: ['lessons_scheduled', id],
@@ -278,6 +290,18 @@ export default function RoomPage() {
               <p className="text-sm text-[#1B1B1B] whitespace-pre-wrap pt-1">{room.description}</p>
             )}
           </div>
+
+          {/* 先生ボックス */}
+          {instructorProfile && (
+            <div className="bg-white rounded-2xl p-4 flex items-center gap-3">
+              <Avatar avatarUrl={instructorProfile.avatar_url} displayName={instructorProfile.display_name} size={40} />
+              <div className="flex-1">
+                <p className="font-bold text-[#1B1B1B]">{instructorProfile.display_name}</p>
+                <p className="text-xs text-[#6B7280]">先生</p>
+              </div>
+              <span className="w-3 h-3 rounded-full bg-[#2D6A4F]" />
+            </div>
+          )}
 
           {/* 統計カード */}
           <div className="grid grid-cols-3 gap-2">
