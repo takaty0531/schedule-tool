@@ -80,7 +80,18 @@ function CreateRoomModal({ onClose }: { onClose: () => void }) {
 export default function DashboardPage() {
   const { profile, user } = useAuth()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [showCreate, setShowCreate] = useState(false)
+
+  const { mutate: deleteRoom } = useMutation({
+    mutationFn: async (roomId: string) => {
+      const { error } = await supabase.from('rooms').delete().eq('id', roomId)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.refetchQueries({ queryKey: ['rooms', 'instructor'] })
+    },
+  })
 
   // 講師: 自分が作ったルーム一覧
   const { data: instructorRooms = [], error: roomsError, isLoading: roomsLoading } = useQuery({
@@ -163,19 +174,37 @@ export default function DashboardPage() {
         ) : (
           <div className="space-y-3">
             {rooms.map(room => (
-              <button
+              <div
                 key={room.id}
-                onClick={() => navigate(`/room/${room.id}`)}
-                className="w-full bg-white rounded-2xl p-4 text-left shadow-sm flex items-center justify-between"
+                className="w-full bg-white rounded-2xl p-4 shadow-sm flex items-center justify-between"
               >
-                <div>
+                <button
+                  onClick={() => navigate(`/room/${room.id}`)}
+                  className="flex-1 text-left"
+                >
                   <p className="font-bold text-[#1B1B1B]">{room.name}</p>
                   <p className="text-xs text-[#6B7280] mt-1">授業時間: {room.lesson_minutes}分</p>
+                </button>
+                <div className="flex items-center gap-2">
+                  {profile?.role === 'instructor' && (
+                    <button
+                      onClick={() => {
+                        if (confirm(`「${room.name}」を削除しますか？`)) {
+                          deleteRoom(room.id)
+                        }
+                      }}
+                      className="p-2 text-[#6B7280] hover:text-red-500 transition-colors"
+                    >
+                      <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  )}
+                  <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#9CA3AF" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
                 </div>
-                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#9CA3AF" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-              </button>
+              </div>
             ))}
           </div>
         )}
