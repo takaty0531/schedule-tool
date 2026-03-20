@@ -101,6 +101,9 @@ export type Homework = {
   title: string
   description: string | null
   reference_text: string | null
+  due_type: 'lesson' | 'next_lesson' | 'custom' | null
+  due_date: string | null        // YYYY-MM-DD（custom時）
+  due_lesson_id: string | null   // lesson時: 指定の授業日
   created_at: string
 }
 

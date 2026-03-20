@@ -13,6 +13,28 @@ function lessonLabel(lesson: Lesson): string {
   return `${d.getMonth() + 1}/${d.getDate()}(${days[d.getDay()]}) ${minutesToTime(d.getHours() * 60 + d.getMinutes())}`
 }
 
+function lessonDateLabel(lesson: Lesson): string {
+  const d = new Date(lesson.scheduled_at)
+  const days = ['日', '月', '火', '水', '木', '金', '土']
+  return `${d.getMonth() + 1}月${d.getDate()}日(${days[d.getDay()]})`
+}
+
+// 提出日の表示ラベル
+function dueDateLabel(hw: Homework, lessonsMap: Map<string, Lesson>): string | null {
+  if (!hw.due_type) return null
+  if (hw.due_type === 'next_lesson') return '次回授業まで'
+  if (hw.due_type === 'lesson' && hw.due_lesson_id) {
+    const l = lessonsMap.get(hw.due_lesson_id)
+    return l ? `${lessonDateLabel(l)}まで` : '指定授業まで'
+  }
+  if (hw.due_type === 'custom' && hw.due_date) {
+    const d = new Date(hw.due_date)
+    const days = ['日', '月', '火', '水', '木', '金', '土']
+    return `${d.getMonth() + 1}月${d.getDate()}日(${days[d.getDay()]})まで`
+  }
+  return null
+}
+
 // 宿題追加・編集モーダル
 function HomeworkModal({
   room,
@@ -30,25 +52,27 @@ function HomeworkModal({
   const [description, setDescription] = useState(editing?.description ?? '')
   const [referenceText, setReferenceText] = useState(editing?.reference_text ?? '')
   const [lessonId, setLessonId] = useState(editing?.lesson_id ?? '')
+  // 提出日
+  const [dueType, setDueType] = useState<'lesson' | 'next_lesson' | 'custom' | ''>(editing?.due_type ?? '')
+  const [dueLessonId, setDueLessonId] = useState(editing?.due_lesson_id ?? '')
+  const [dueDate, setDueDate] = useState(editing?.due_date ?? '')
 
   const { mutate, isPending } = useMutation({
     mutationFn: async () => {
+      const payload = {
+        title: title.trim(),
+        description: description.trim() || null,
+        reference_text: referenceText.trim() || null,
+        lesson_id: lessonId || null,
+        due_type: dueType || null,
+        due_lesson_id: dueType === 'lesson' ? (dueLessonId || null) : null,
+        due_date: dueType === 'custom' ? (dueDate || null) : null,
+      }
       if (editing) {
-        const { error } = await supabase.from('homework').update({
-          title: title.trim(),
-          description: description.trim() || null,
-          reference_text: referenceText.trim() || null,
-          lesson_id: lessonId || null,
-        }).eq('id', editing.id)
+        const { error } = await supabase.from('homework').update(payload).eq('id', editing.id)
         if (error) throw error
       } else {
-        const { error } = await supabase.from('homework').insert({
-          room_id: room.id,
-          title: title.trim(),
-          description: description.trim() || null,
-          reference_text: referenceText.trim() || null,
-          lesson_id: lessonId || null,
-        })
+        const { error } = await supabase.from('homework').insert({ room_id: room.id, ...payload })
         if (error) throw error
       }
     },
@@ -80,6 +104,81 @@ function HomeworkModal({
           />
         </div>
 
+        {/* 授業割り当て */}
+        <div>
+          <label className="block text-sm font-medium text-[#1B1B1B] mb-1">授業日程（任意）</label>
+          {lessons.length === 0 ? (
+            <p className="text-xs text-[#9CA3AF] py-2">確定した授業がありません</p>
+          ) : (
+            <select
+              value={lessonId}
+              onChange={e => setLessonId(e.target.value)}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788]"
+            >
+              <option value="">未割り当て</option>
+              {lessons.map(l => (
+                <option key={l.id} value={l.id}>{lessonLabel(l)}</option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        {/* 提出日 */}
+        <div>
+          <label className="block text-sm font-medium text-[#1B1B1B] mb-2">提出日（任意）</label>
+          <div className="flex gap-2 flex-wrap">
+            {[
+              { value: '', label: '設定なし' },
+              { value: 'next_lesson', label: '次回授業まで' },
+              { value: 'lesson', label: '授業日を指定' },
+              { value: 'custom', label: '日付を入力' },
+            ].map(opt => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => setDueType(opt.value as typeof dueType)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium border transition-colors ${
+                  dueType === opt.value
+                    ? 'bg-[#2D6A4F] text-white border-[#2D6A4F]'
+                    : 'bg-white text-[#6B7280] border-gray-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+
+          {/* 授業日指定 */}
+          {dueType === 'lesson' && (
+            <div className="mt-2">
+              {lessons.length === 0 ? (
+                <p className="text-xs text-[#9CA3AF]">確定した授業がありません</p>
+              ) : (
+                <select
+                  value={dueLessonId}
+                  onChange={e => setDueLessonId(e.target.value)}
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788]"
+                >
+                  <option value="">授業を選択</option>
+                  {lessons.map(l => (
+                    <option key={l.id} value={l.id}>{lessonLabel(l)}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
+          {/* 日付自由入力 */}
+          {dueType === 'custom' && (
+            <input
+              type="date"
+              value={dueDate}
+              onChange={e => setDueDate(e.target.value)}
+              className="mt-2 w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788]"
+            />
+          )}
+        </div>
+
         {/* 説明 */}
         <div>
           <label className="block text-sm font-medium text-[#1B1B1B] mb-1">説明（任意）</label>
@@ -106,25 +205,6 @@ function HomeworkModal({
           />
         </div>
 
-        {/* 授業割り当て */}
-        <div>
-          <label className="block text-sm font-medium text-[#1B1B1B] mb-1">授業日程（任意）</label>
-          {lessons.length === 0 ? (
-            <p className="text-xs text-[#9CA3AF] py-2">確定した授業がありません（スケジュールタブで授業を確定してください）</p>
-          ) : (
-            <select
-              value={lessonId}
-              onChange={e => setLessonId(e.target.value)}
-              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788]"
-            >
-              <option value="">未割り当て</option>
-              {lessons.map(l => (
-                <option key={l.id} value={l.id}>{lessonLabel(l)}</option>
-              ))}
-            </select>
-          )}
-        </div>
-
         <button
           onClick={() => mutate()}
           disabled={!title.trim() || isPending}
@@ -142,6 +222,7 @@ function HomeworkModal({
 function HomeworkDetailModal({
   hw,
   lesson,
+  dueLessonLabel,
   isInstructor,
   onEdit,
   onDelete,
@@ -149,6 +230,7 @@ function HomeworkDetailModal({
 }: {
   hw: Homework
   lesson: Lesson | null
+  dueLessonLabel: string | null
   isInstructor: boolean
   onEdit: () => void
   onDelete: () => void
@@ -167,12 +249,20 @@ function HomeworkDetailModal({
           )}
         </div>
 
-        {lesson && (
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-[#2D6A4F] shrink-0" />
-            <span className="text-sm text-[#2D6A4F] font-medium">{lessonLabel(lesson)}</span>
-          </div>
-        )}
+        <div className="space-y-2">
+          {lesson && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-[#6B7280]">授業日程:</span>
+              <span className="text-sm text-[#2D6A4F] font-medium">{lessonLabel(lesson)}</span>
+            </div>
+          )}
+          {dueLessonLabel && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-[#6B7280]">提出日:</span>
+              <span className="text-sm font-medium text-orange-500">{dueLessonLabel}</span>
+            </div>
+          )}
+        </div>
 
         {hw.description && (
           <div className="bg-[#F7F9F7] rounded-xl p-4">
@@ -202,14 +292,11 @@ export default function HomeworkTab({ room }: Props) {
   const [editingHw, setEditingHw] = useState<Homework | null>(null)
   const [detailHw, setDetailHw] = useState<Homework | null>(null)
 
-  // 宿題一覧
   const { data: homeworkList = [] } = useQuery({
     queryKey: ['homework', room.id],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('homework')
-        .select('*')
-        .eq('room_id', room.id)
+        .from('homework').select('*').eq('room_id', room.id)
         .order('created_at', { ascending: false })
       if (error) throw error
       return data as Homework[]
@@ -217,7 +304,6 @@ export default function HomeworkTab({ room }: Props) {
     enabled: !!user,
   })
 
-  // 確定済み授業一覧
   const { data: lessons = [] } = useQuery({
     queryKey: ['lessons_scheduled', room.id],
     queryFn: async () => {
@@ -248,12 +334,13 @@ export default function HomeworkTab({ room }: Props) {
       <div className="overflow-y-auto px-4 py-4 space-y-3" style={{ maxHeight: 'calc(100svh - 280px)' }}>
         {homeworkList.length === 0 && (
           <p className="text-sm text-[#6B7280] text-center py-8">
-            {isInstructor ? '下の「＋ 追加」ボタンから宿題を追加しましょう' : '宿題はまだありません'}
+            {isInstructor ? '下のボタンから宿題を追加しましょう' : '宿題はまだありません'}
           </p>
         )}
 
         {homeworkList.map(hw => {
           const lesson = hw.lesson_id ? lessonsMap.get(hw.lesson_id) ?? null : null
+          const dueLabel = dueDateLabel(hw, lessonsMap)
           return (
             <button
               key={hw.id}
@@ -263,6 +350,9 @@ export default function HomeworkTab({ room }: Props) {
               <p className="font-medium text-[#1B1B1B]">{hw.title}</p>
               {lesson && (
                 <p className="text-xs text-[#52B788]">{lessonLabel(lesson)}</p>
+              )}
+              {dueLabel && (
+                <p className="text-xs font-medium text-orange-500">{dueLabel}</p>
               )}
               {hw.description && (
                 <p className="text-xs text-[#6B7280] line-clamp-2">{hw.description}</p>
@@ -302,6 +392,7 @@ export default function HomeworkTab({ room }: Props) {
         <HomeworkDetailModal
           hw={detailHw}
           lesson={detailHw.lesson_id ? lessonsMap.get(detailHw.lesson_id) ?? null : null}
+          dueLessonLabel={dueDateLabel(detailHw, lessonsMap)}
           isInstructor={isInstructor}
           onEdit={() => { setEditingHw(detailHw); setDetailHw(null); setShowModal(true) }}
           onDelete={() => deleteHw(detailHw.id)}
