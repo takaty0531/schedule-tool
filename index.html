@@ -4,7 +4,26 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>forclass-temp</title>
+    <title>ForClass</title>
+    <script>
+      // GitHub Pages SPA: 404.html から渡されたパスを復元
+      (function() {
+        var redirect = window.location.search.slice(1);
+        if (redirect.startsWith('p=')) {
+          var params = redirect.split('&');
+          var path = '';
+          var query = '';
+          params.forEach(function(p) {
+            if (p.startsWith('p=')) path = p.slice(2).replace(/~and~/g, '&');
+            else if (p.startsWith('q=')) query = '?' + p.slice(2).replace(/~and~/g, '&');
+          });
+          window.history.replaceState(
+            null, null,
+            window.location.pathname + (path ? '/' + path : '') + query + window.location.hash
+          );
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
