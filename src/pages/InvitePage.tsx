@@ -32,7 +32,7 @@ export default function InvitePage() {
   }, [token])
 
   const handleJoin = async () => {
-    if (!invitation || !session || !profile) return
+    if (!invitation || !session) return
     setStatus('joining')
 
     // room_membersに登録（生徒・保護者共通）
