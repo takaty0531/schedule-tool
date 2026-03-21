@@ -143,8 +143,30 @@ export default function RoomPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { profile } = useAuth()
+  const queryClient = useQueryClient()
   const [showInvite, setShowInvite] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('detail')
+
+  // LINE連絡
+  const [lineMessage, setLineMessage] = useState('')
+  const [lineSending, setLineSending] = useState(false)
+  const [lineSent, setLineSent] = useState('')
+
+  const handleLineSend = async () => {
+    if (!lineMessage.trim() || !id) return
+    setLineSending(true)
+    setLineSent('')
+    const { data, error } = await supabase.functions.invoke('line-send', {
+      body: { room_id: id, message: lineMessage.trim() },
+    })
+    setLineSending(false)
+    if (error) {
+      setLineSent('送信に失敗しました')
+    } else {
+      setLineSent(`${data?.sent ?? 0}名に送信しました`)
+      setLineMessage('')
+    }
+  }
 
   // ルーム情報
   const { data: room } = useQuery({
@@ -202,6 +224,56 @@ export default function RoomPage() {
       if (error) throw error
       return data as Lesson[]
     },
+  })
+
+  // 通知設定（講師のみ）
+  const { data: notifSetting } = useQuery({
+    queryKey: ['notification_settings', id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('notification_settings')
+        .select('*')
+        .eq('room_id', id!)
+        .maybeSingle()
+      return data as {
+        id: string
+        room_id: string
+        morning_notify: boolean
+        morning_time: string
+        pre_lesson_notify: boolean
+        pre_lesson_minutes: number
+      } | null
+    },
+    enabled: profile?.role === 'instructor',
+  })
+
+  const [notifForm, setNotifForm] = useState<{
+    morning_notify: boolean
+    morning_time: string
+    pre_lesson_notify: boolean
+    pre_lesson_minutes: number
+  } | null>(null)
+
+  // notifSetting が取れたら初期値をセット
+  const resolvedNotif = notifForm ?? (notifSetting ? {
+    morning_notify: notifSetting.morning_notify,
+    morning_time: notifSetting.morning_time?.slice(0, 5) ?? '07:30',
+    pre_lesson_notify: notifSetting.pre_lesson_notify,
+    pre_lesson_minutes: notifSetting.pre_lesson_minutes,
+  } : { morning_notify: true, morning_time: '07:30', pre_lesson_notify: true, pre_lesson_minutes: 30 })
+
+  const { mutate: saveNotif, isPending: notifSaving } = useMutation({
+    mutationFn: async () => {
+      const payload = { ...resolvedNotif, room_id: id! }
+      if (notifSetting?.id) {
+        const { error } = await supabase.from('notification_settings').update(payload).eq('id', notifSetting.id)
+        if (error) throw error
+      } else {
+        const { error } = await supabase.from('notification_settings').insert(payload)
+        if (error) throw error
+      }
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notification_settings', id] }),
   })
 
   // 招待一覧（講師のみ）
@@ -426,17 +498,117 @@ export default function RoomPage() {
             </div>
           )}
 
-          {/* 招待ボタン（講師のみ） */}
+          {/* 先生専用セクション */}
           {profile?.role === 'instructor' && (
-            <button
-              onClick={() => setShowInvite(true)}
-              className="w-full border-2 border-dashed border-[#52B788] text-[#2D6A4F] font-bold py-3 rounded-2xl flex items-center justify-center gap-2"
-            >
-              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-              </svg>
-              生徒・保護者を招待
-            </button>
+            <>
+              {/* LINE通知設定 */}
+              <div className="bg-white rounded-2xl p-4 space-y-4">
+                <h2 className="text-sm font-bold text-[#1B1B1B]">LINE通知設定</h2>
+
+                {/* 朝の通知 */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-[#1B1B1B]">朝の通知</span>
+                    <button
+                      onClick={() => setNotifForm(prev => ({ ...resolvedNotif, ...prev, morning_notify: !resolvedNotif.morning_notify }))}
+                      className={`w-11 h-6 rounded-full transition-colors ${resolvedNotif.morning_notify ? 'bg-[#2D6A4F]' : 'bg-gray-200'}`}
+                    >
+                      <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${resolvedNotif.morning_notify ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+                  {resolvedNotif.morning_notify && (
+                    <div className="flex items-center gap-2 pl-1">
+                      <span className="text-xs text-[#6B7280]">通知時刻</span>
+                      <input
+                        type="time"
+                        value={resolvedNotif.morning_time}
+                        onChange={e => setNotifForm({ ...resolvedNotif, morning_time: e.target.value })}
+                        className="border border-gray-200 rounded-lg px-2 py-1 text-sm outline-none focus:border-[#52B788]"
+                      />
+                    </div>
+                  )}
+                  <p className="text-xs text-[#9CA3AF] pl-1">授業当日の朝に宿題・学習計画を含む通知を送信</p>
+                </div>
+
+                {/* 授業前通知 */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-[#1B1B1B]">授業前通知</span>
+                    <button
+                      onClick={() => setNotifForm({ ...resolvedNotif, pre_lesson_notify: !resolvedNotif.pre_lesson_notify })}
+                      className={`w-11 h-6 rounded-full transition-colors ${resolvedNotif.pre_lesson_notify ? 'bg-[#2D6A4F]' : 'bg-gray-200'}`}
+                    >
+                      <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${resolvedNotif.pre_lesson_notify ? 'translate-x-5' : 'translate-x-0'}`} />
+                    </button>
+                  </div>
+                  {resolvedNotif.pre_lesson_notify && (
+                    <div className="flex items-center gap-2 pl-1">
+                      <span className="text-xs text-[#6B7280]">何分前</span>
+                      <select
+                        value={resolvedNotif.pre_lesson_minutes}
+                        onChange={e => setNotifForm({ ...resolvedNotif, pre_lesson_minutes: Number(e.target.value) })}
+                        className="border border-gray-200 rounded-lg px-2 py-1 text-sm outline-none focus:border-[#52B788]"
+                      >
+                        {[10, 15, 20, 30, 45, 60].map(m => (
+                          <option key={m} value={m}>{m}分前</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  onClick={() => saveNotif()}
+                  disabled={notifSaving}
+                  className="w-full bg-[#2D6A4F] hover:bg-[#245c43] text-white text-sm font-bold py-2.5 rounded-xl transition-colors disabled:opacity-40"
+                >
+                  {notifSaving ? '保存中...' : '通知設定を保存'}
+                </button>
+              </div>
+
+              {/* LINE連絡 */}
+              <div className="bg-white rounded-2xl p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <svg width="18" height="18" viewBox="0 0 48 48" fill="#06C755"><path d="M24 4C12.95 4 4 11.86 4 21.5c0 6.37 4.1 11.96 10.3 15.18-.45 1.68-1.63 6.1-1.87 7.05-.3 1.17.43 1.16 1.01.84.47-.27 7.43-4.91 10.44-6.9.69.1 1.4.15 2.12.15 11.05 0 20-7.86 20-17.5S35.05 4 24 4z"/></svg>
+                  <h2 className="text-sm font-bold text-[#1B1B1B]">LINE連絡</h2>
+                </div>
+                <p className="text-xs text-[#9CA3AF]">LINE連携済みの生徒・保護者にメッセージを送信</p>
+                <textarea
+                  value={lineMessage}
+                  onChange={e => { setLineMessage(e.target.value); setLineSent('') }}
+                  rows={3}
+                  maxLength={500}
+                  placeholder="メッセージを入力..."
+                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788] resize-none"
+                />
+                {lineSent && (
+                  <p className={`text-xs ${lineSent.includes('失敗') ? 'text-red-500' : 'text-[#2D6A4F]'}`}>{lineSent}</p>
+                )}
+                <button
+                  onClick={handleLineSend}
+                  disabled={lineSending || !lineMessage.trim()}
+                  className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white text-sm font-bold py-2.5 rounded-xl transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {lineSending ? '送信中...' : (
+                    <>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                      LINEで送信
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* 招待ボタン */}
+              <button
+                onClick={() => setShowInvite(true)}
+                className="w-full border-2 border-dashed border-[#52B788] text-[#2D6A4F] font-bold py-3 rounded-2xl flex items-center justify-center gap-2"
+              >
+                <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                </svg>
+                生徒・保護者を招待
+              </button>
+            </>
           )}
 
         </div>

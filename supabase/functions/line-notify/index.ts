@@ -29,13 +29,15 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  // 送信すべき通知を取得（fire_at が現在時刻以前 かつ 未送信）
+  // 送信すべき通知を取得
   const { data: notifications } = await supabase
     .from('scheduled_notifications')
     .select(`
       id,
       type,
       fire_at,
+      lesson_id,
+      room_id,
       lessons(scheduled_at, rooms(name)),
       profiles(line_user_id)
     `)
@@ -63,14 +65,35 @@ Deno.serve(async (req) => {
     const roomName = (lesson.rooms as { name: string } | null)?.name ?? 'ルーム'
 
     let message = ''
+
     if (notif.type === 'morning') {
+      // 宿題・学習計画の内容を取得
+      const [{ data: homeworkList }, { data: planItems }] = await Promise.all([
+        supabase
+          .from('homework')
+          .select('title')
+          .eq('lesson_id', notif.lesson_id),
+        supabase
+          .from('study_plan_items')
+          .select('title, subject')
+          .eq('lesson_id', notif.lesson_id)
+          .is('parent_id', null), // トップレベルの項目のみ
+      ])
+
       message = `おはようございます！\n本日 ${lessonHour}:${lessonMinute} から「${roomName}」の授業があります。`
+
+      if (homeworkList && homeworkList.length > 0) {
+        message += '\n\n📚 宿題\n' + homeworkList.map(h => `・${h.title}`).join('\n')
+      }
+
+      if (planItems && planItems.length > 0) {
+        message += '\n\n📋 学習計画\n' + planItems.map(p => `・${p.title}`).join('\n')
+      }
     } else {
-      // 授業開始時刻と fire_at の差分から「何分前」を計算
       const diffMinutes = Math.round(
         (lessonDate.getTime() - new Date(notif.fire_at).getTime()) / 60000
       )
-      message = `${diffMinutes}分後に「${roomName}」の授業が始まります！`
+      message = `⏰ ${diffMinutes}分後に「${roomName}」の授業が始まります！`
     }
 
     const ok = await sendLineMessage(profile.line_user_id, message)
