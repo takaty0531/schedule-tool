@@ -154,8 +154,10 @@ export default function SettingsPage() {
           <h2 className="text-sm font-bold text-[#1B1B1B]">アカウント</h2>
           <div className="space-y-2">
             <div className="flex items-center justify-between py-2 border-b border-gray-100">
-              <span className="text-xs text-[#6B7280]">メールアドレス</span>
-              <span className="text-sm text-[#1B1B1B]">{user?.email ?? '—'}</span>
+              <span className="text-xs text-[#6B7280] shrink-0">メール</span>
+              <span className="text-sm text-[#1B1B1B] truncate ml-4 text-right max-w-[200px]">
+                {user?.email?.startsWith('line_') ? 'LINEアカウント' : (user?.email ?? '—')}
+              </span>
             </div>
             <div className="flex items-center justify-between py-2 border-b border-gray-100">
               <span className="text-xs text-[#6B7280]">ロール</span>
