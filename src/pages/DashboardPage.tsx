@@ -125,6 +125,61 @@ export default function DashboardPage() {
 
   const rooms = profile?.role === 'instructor' ? instructorRooms : memberRooms
 
+  // 各ルームの次回授業
+  const { data: nextLessonsMap = {} } = useQuery({
+    queryKey: ['next_lessons_dashboard', rooms.map(r => r.id).join(',')],
+    queryFn: async () => {
+      if (rooms.length === 0) return {}
+      const now = new Date().toISOString()
+      const { data } = await supabase
+        .from('lessons')
+        .select('id, room_id, scheduled_at')
+        .in('room_id', rooms.map(r => r.id))
+        .eq('status', 'scheduled')
+        .gte('scheduled_at', now)
+        .order('scheduled_at')
+      const map: Record<string, { scheduled_at: string }> = {}
+      data?.forEach(l => { if (!map[l.room_id]) map[l.room_id] = l })
+      return map
+    },
+    enabled: rooms.length > 0,
+  })
+
+  // 各ルームの宿題件数
+  const { data: homeworkCountMap = {} } = useQuery({
+    queryKey: ['homework_counts_dashboard', rooms.map(r => r.id).join(',')],
+    queryFn: async () => {
+      if (rooms.length === 0) return {}
+      const { data } = await supabase
+        .from('homework')
+        .select('room_id')
+        .in('room_id', rooms.map(r => r.id))
+      const map: Record<string, number> = {}
+      data?.forEach(h => { map[h.room_id] = (map[h.room_id] ?? 0) + 1 })
+      return map
+    },
+    enabled: rooms.length > 0,
+  })
+
+  // 今日の授業一覧
+  const { data: todayLessons = [] } = useQuery({
+    queryKey: ['today_lessons', user?.id],
+    queryFn: async () => {
+      const now = new Date()
+      const todayJST = new Date(now.getTime() + 9 * 60 * 60 * 1000)
+      const todayStr = todayJST.toISOString().split('T')[0]
+      const { data } = await supabase
+        .from('lessons')
+        .select('id, room_id, scheduled_at, duration_minutes, rooms(name)')
+        .eq('status', 'scheduled')
+        .gte('scheduled_at', `${todayStr}T00:00:00+09:00`)
+        .lt('scheduled_at', `${todayStr}T23:59:59+09:00`)
+        .order('scheduled_at')
+      return data ?? []
+    },
+    enabled: !!user,
+  })
+
   return (
     <div className="min-h-svh bg-[#F7F9F7] pb-20">
       {/* ヘッダー */}
@@ -155,6 +210,29 @@ export default function DashboardPage() {
           </button>
         )}
 
+        {/* 今日の授業バナー */}
+        {todayLessons.length > 0 && (
+          <div className="bg-[#2D6A4F] rounded-2xl p-4 text-white space-y-2">
+            <p className="text-xs opacity-70 font-medium">📅 今日の授業</p>
+            {todayLessons.map((l: any) => {
+              const d = new Date(l.scheduled_at)
+              const h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0')
+              const endMin = d.getHours() * 60 + d.getMinutes() + l.duration_minutes
+              const eh = Math.floor(endMin / 60), em = String(endMin % 60).padStart(2, '0')
+              return (
+                <button
+                  key={l.id}
+                  onClick={() => navigate(`/room/${l.room_id}`)}
+                  className="w-full flex items-center justify-between"
+                >
+                  <span className="font-bold text-sm">{(l.rooms as any)?.name}</span>
+                  <span className="text-xs opacity-80">{h}:{m} 〜 {eh}:{em}</span>
+                </button>
+              )
+            })}
+          </div>
+        )}
+
         {/* クエリエラー表示 */}
         {roomsError && (
           <p className="text-red-500 text-sm text-center">{(roomsError as Error).message}</p>
@@ -179,12 +257,26 @@ export default function DashboardPage() {
                 key={room.id}
                 className="w-full bg-white rounded-2xl p-4 shadow-sm flex items-center justify-between"
               >
-                <button
-                  onClick={() => navigate(`/room/${room.id}`)}
-                  className="flex-1 text-left"
-                >
+                <button onClick={() => navigate(`/room/${room.id}`)} className="flex-1 text-left">
                   <p className="font-bold text-[#1B1B1B]">{room.name}</p>
-                  <p className="text-xs text-[#6B7280] mt-1">授業時間: {room.lesson_minutes}分</p>
+                  <div className="flex items-center gap-3 mt-1">
+                    {nextLessonsMap[room.id] ? (
+                      <p className="text-xs text-[#6B7280]">
+                        次回: {(() => {
+                          const d = new Date(nextLessonsMap[room.id].scheduled_at)
+                          const days = ['日','月','火','水','木','金','土']
+                          return `${d.getMonth()+1}月${d.getDate()}日(${days[d.getDay()]})`
+                        })()}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-[#6B7280]">授業時間: {room.lesson_minutes}分</p>
+                    )}
+                    {(homeworkCountMap[room.id] ?? 0) > 0 && (
+                      <span className="text-[10px] bg-[#D8F3DC] text-[#2D6A4F] px-2 py-0.5 rounded-full font-medium">
+                        宿題 {homeworkCountMap[room.id]}件
+                      </span>
+                    )}
+                  </div>
                 </button>
                 <div className="flex items-center gap-2">
                   {profile?.role === 'instructor' && (

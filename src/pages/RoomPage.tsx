@@ -291,6 +291,34 @@ export default function RoomPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notification_settings', id] }),
   })
 
+  // 直近の宿題一覧（生徒・保護者向け）
+  const { data: upcomingHomework = [] } = useQuery({
+    queryKey: ['homework_room', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('homework').select('*').eq('room_id', id!).order('created_at', { ascending: false }).limit(5)
+      if (error) throw error
+      return data
+    },
+    enabled: profile?.role !== 'instructor' && !!id,
+  })
+
+  // LINE通知履歴（講師のみ）
+  const { data: lineLogs = [] } = useQuery({
+    queryKey: ['line_logs', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('line_logs')
+        .select('*')
+        .eq('room_id', id!)
+        .order('created_at', { ascending: false })
+        .limit(20)
+      if (error) throw error
+      return data
+    },
+    enabled: profile?.role === 'instructor' && !!id,
+  })
+
   // 招待一覧（講師のみ）
   const { data: invitations = [] } = useQuery({
     queryKey: ['invitations', id],
@@ -365,6 +393,63 @@ export default function RoomPage() {
           : `${totalDoneMin}分`
         const days = ['日','月','火','水','木','金','土']
         const nextLesson = scheduledLessons[0] ?? null
+
+        // 生徒・保護者ビュー
+        if (profile?.role !== 'instructor') {
+          return (
+            <div className="max-w-lg mx-auto px-4 py-6 space-y-5 overflow-y-auto" style={{ maxHeight: 'calc(100svh - 200px)' }}>
+              {/* 先生ボックス */}
+              {instructorProfile && (
+                <div className="bg-white rounded-2xl p-4 flex items-center gap-3">
+                  <Avatar avatarUrl={instructorProfile.avatar_url} displayName={instructorProfile.display_name} size={40} />
+                  <div className="flex-1">
+                    <p className="font-bold text-[#1B1B1B]">{instructorProfile.display_name}</p>
+                    <p className="text-xs text-[#6B7280]">先生</p>
+                  </div>
+                  <span className="w-3 h-3 rounded-full bg-[#2D6A4F]" />
+                </div>
+              )}
+
+              {/* 次回の授業カード */}
+              {nextLesson && (() => {
+                const d = new Date(nextLesson.scheduled_at)
+                const endMin = d.getHours() * 60 + d.getMinutes() + nextLesson.duration_minutes
+                const learnerMember = nextLesson.learner_id ? members.find(m => m.learner_id === nextLesson.learner_id) : null
+                return (
+                  <div className="bg-[#2D6A4F] rounded-2xl p-4 text-white">
+                    <p className="text-xs opacity-70 mb-1">次回の授業</p>
+                    <p className="font-bold text-base">
+                      {d.getMonth() + 1}月{d.getDate()}日({days[d.getDay()]})
+                    </p>
+                    <p className="text-sm opacity-90 mt-0.5">
+                      {minutesToTime(d.getHours() * 60 + d.getMinutes())} 〜 {minutesToTime(endMin)}（{nextLesson.duration_minutes}分）
+                    </p>
+                    {learnerMember && (
+                      <p className="text-xs mt-1 opacity-80">{learnerMember.display_name}</p>
+                    )}
+                  </div>
+                )
+              })()}
+
+              {/* 宿題セクション */}
+              <div className="bg-white rounded-2xl p-4 space-y-3">
+                <h2 className="text-sm font-bold text-[#1B1B1B]">宿題</h2>
+                {upcomingHomework.length === 0 ? (
+                  <p className="text-sm text-[#6B7280] text-center py-2">宿題はありません</p>
+                ) : (
+                  <div className="space-y-2">
+                    {upcomingHomework.map((hw: { id: string; title: string }) => (
+                      <div key={hw.id} className="flex items-start gap-2 py-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-[#52B788] shrink-0 mt-1.5" />
+                        <span className="text-sm text-[#1B1B1B]">{hw.title}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )
+        }
 
         return (
         <div className="max-w-lg mx-auto px-4 py-6 space-y-5 overflow-y-auto" style={{ maxHeight: 'calc(100svh - 200px)' }}>
@@ -678,6 +763,31 @@ export default function RoomPage() {
                   )}
                 </button>
               </div>
+
+              {/* LINE通知履歴 */}
+              {lineLogs.length > 0 && (
+                <div className="bg-white rounded-2xl p-4 space-y-3">
+                  <h2 className="text-sm font-bold text-[#1B1B1B]">LINE送信履歴</h2>
+                  <div className="space-y-2">
+                    {lineLogs.map((log: { id: string; type: string; created_at: string; sent_count: number; message: string }) => {
+                      const d = new Date(log.created_at)
+                      const typeLabel = log.type === 'lesson_done' ? '授業完了通知' : '手動送信'
+                      const typeColor = log.type === 'lesson_done' ? 'text-[#2D6A4F] bg-[#D8F3DC]' : 'text-[#6B7280] bg-gray-100'
+                      return (
+                        <div key={log.id} className="border border-gray-100 rounded-xl p-3 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${typeColor}`}>{typeLabel}</span>
+                            <span className="text-[10px] text-[#9CA3AF]">
+                              {d.getMonth()+1}/{d.getDate()} {d.getHours()}:{String(d.getMinutes()).padStart(2,'0')} · {log.sent_count}名
+                            </span>
+                          </div>
+                          <p className="text-xs text-[#6B7280] line-clamp-2">{log.message}</p>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* 招待ボタン */}
               <button

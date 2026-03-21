@@ -101,6 +101,10 @@ export default function LessonDetailPage() {
       queryClient.invalidateQueries({ queryKey: ['lessons_scheduled', roomId] })
       queryClient.invalidateQueries({ queryKey: ['lessons', roomId, 'all'] })
       queryClient.invalidateQueries({ queryKey: ['lessons_done', roomId] })
+      // 授業完了通知をLINEで送信（fire and forget）
+      supabase.functions.invoke('line-lesson-done', {
+        body: { room_id: roomId, lesson_id: lessonId },
+      })
     },
   })
 

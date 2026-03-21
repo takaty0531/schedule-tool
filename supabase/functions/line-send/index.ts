@@ -112,6 +112,15 @@ Deno.serve(async (req) => {
     }
   }
 
+  // 送信後にline_logsに記録
+  await supabase.from('line_logs').insert({
+    room_id,
+    sender_id: user.id,
+    type: 'manual',
+    message: lineMessage,
+    sent_count: sentCount,
+  })
+
   return new Response(JSON.stringify({ sent: sentCount }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
