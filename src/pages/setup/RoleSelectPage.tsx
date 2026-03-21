@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { supabase } from '../../lib/supabase'
@@ -12,10 +12,15 @@ const roles: { value: Role; label: string; description: string }[] = [
 
 export default function RoleSelectPage() {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
   const [selected, setSelected] = useState<Role | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
+  // 役割が設定済みならスキップ
+  useEffect(() => {
+    if (profile?.role) navigate('/setup/profile', { replace: true })
+  }, [profile, navigate])
 
   const handleNext = async () => {
     if (!selected || !user) return
