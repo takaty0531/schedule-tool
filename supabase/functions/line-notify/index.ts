@@ -29,21 +29,20 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  const now = new Date()
-  const todayJST = new Date(now.getTime() + 9 * 60 * 60 * 1000)
-  const todayStr = todayJST.toISOString().split('T')[0]
-  const currentHour = todayJST.getHours()
-  const currentMinute = todayJST.getMinutes()
+  // 送信すべき通知を取得（fire_at が現在時刻以前 かつ 未送信）
+  const { data: notifications } = await supabase
+    .from('scheduled_notifications')
+    .select(`
+      id,
+      type,
+      fire_at,
+      lessons(scheduled_at, rooms(name)),
+      profiles(line_user_id)
+    `)
+    .lte('fire_at', new Date().toISOString())
+    .eq('sent', false)
 
-  // 確定済み授業を取得
-  const { data: lessons } = await supabase
-    .from('lessons')
-    .select('id, room_id, learner_id, scheduled_at, duration_minutes, rooms(name, instructor_id)')
-    .eq('status', 'scheduled')
-    .gte('scheduled_at', `${todayStr}T00:00:00+09:00`)
-    .lt('scheduled_at', `${todayStr}T23:59:59+09:00`)
-
-  if (!lessons || lessons.length === 0) {
+  if (!notifications || notifications.length === 0) {
     return new Response(JSON.stringify({ sent: 0 }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
@@ -51,56 +50,36 @@ Deno.serve(async (req) => {
 
   let sentCount = 0
 
-  for (const lesson of lessons) {
+  for (const notif of notifications) {
+    const profile = notif.profiles as { line_user_id: string | null } | null
+    const lesson = notif.lessons as { scheduled_at: string; rooms: { name: string } | null } | null
+
+    if (!profile?.line_user_id || !lesson) continue
+
     const lessonDate = new Date(lesson.scheduled_at)
     const lessonJST = new Date(lessonDate.getTime() + 9 * 60 * 60 * 1000)
     const lessonHour = lessonJST.getHours()
-    const lessonMinute = lessonJST.getMinutes()
-    const room = lesson.rooms as { name: string; instructor_id: string } | null
-    if (!room) continue
+    const lessonMinute = String(lessonJST.getMinutes()).padStart(2, '0')
+    const roomName = (lesson.rooms as { name: string } | null)?.name ?? 'ルーム'
 
-    // 通知設定を取得
-    const { data: settings } = await supabase
-      .from('notification_settings')
-      .select('*')
-      .eq('room_id', lesson.room_id)
+    let message = ''
+    if (notif.type === 'morning') {
+      message = `おはようございます！\n本日 ${lessonHour}:${lessonMinute} から「${roomName}」の授業があります。`
+    } else {
+      // 授業開始時刻と fire_at の差分から「何分前」を計算
+      const diffMinutes = Math.round(
+        (lessonDate.getTime() - new Date(notif.fire_at).getTime()) / 60000
+      )
+      message = `${diffMinutes}分後に「${roomName}」の授業が始まります！`
+    }
 
-    for (const setting of settings ?? []) {
-      // 朝の通知（7:30頃）
-      if (setting.morning_notify) {
-        const [mh, mm] = setting.morning_time.split(':').map(Number)
-        if (currentHour === mh && currentMinute === mm) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('line_user_id, display_name')
-            .eq('id', setting.user_id)
-            .maybeSingle()
-          if (profile?.line_user_id) {
-            const msg = `おはようございます！\n本日 ${lessonHour}:${String(lessonMinute).padStart(2, '0')} から「${room.name}」の授業があります。`
-            await sendLineMessage(profile.line_user_id, msg)
-            sentCount++
-          }
-        }
-      }
-
-      // 授業前通知
-      if (setting.pre_lesson_notify) {
-        const preMin = lessonHour * 60 + lessonMinute - setting.pre_lesson_minutes
-        const preHour = Math.floor(preMin / 60)
-        const preMinute = preMin % 60
-        if (currentHour === preHour && currentMinute === preMinute) {
-          const { data: profile } = await supabase
-            .from('profiles')
-            .select('line_user_id, display_name')
-            .eq('id', setting.user_id)
-            .maybeSingle()
-          if (profile?.line_user_id) {
-            const msg = `${setting.pre_lesson_minutes}分後に「${room.name}」の授業が始まります！`
-            await sendLineMessage(profile.line_user_id, msg)
-            sentCount++
-          }
-        }
-      }
+    const ok = await sendLineMessage(profile.line_user_id, message)
+    if (ok) {
+      await supabase
+        .from('scheduled_notifications')
+        .update({ sent: true })
+        .eq('id', notif.id)
+      sentCount++
     }
   }
 
