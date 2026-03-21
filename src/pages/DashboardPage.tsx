@@ -245,7 +245,6 @@ export default function DashboardPage() {
           </div>
         ) : rooms.length === 0 ? (
           <div className="text-center py-16 text-[#6B7280]">
-            <p className="text-4xl mb-3">📚</p>
             <p className="text-sm">
               {profile?.role === 'instructor' ? 'ルームを作成して生徒を招待しましょう' : '招待リンクからルームに参加しましょう'}
             </p>

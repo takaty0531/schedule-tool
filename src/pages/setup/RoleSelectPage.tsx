@@ -4,10 +4,10 @@ import { useAuth } from '../../lib/auth'
 import { supabase } from '../../lib/supabase'
 import type { Role } from '../../types/database'
 
-const roles: { value: Role; label: string; description: string; icon: string }[] = [
-  { value: 'instructor', label: '先生', description: '授業を提供する側', icon: '👨‍🏫' },
-  { value: 'learner', label: '生徒', description: '授業を受ける側', icon: '📚' },
-  { value: 'guardian', label: '保護者', description: '生徒の保護者', icon: '👨‍👩‍👧' },
+const roles: { value: Role; label: string; description: string }[] = [
+  { value: 'instructor', label: '先生', description: '授業を提供する側' },
+  { value: 'learner', label: '生徒', description: '授業を受ける側' },
+  { value: 'guardian', label: '保護者', description: '生徒の保護者' },
 ]
 
 export default function RoleSelectPage() {
@@ -54,8 +54,8 @@ export default function RoleSelectPage() {
               }`}
             >
               <div className="flex items-center gap-4">
-                <span className="text-3xl">{role.icon}</span>
                 <p className="font-bold text-[#1B1B1B]">{role.label}</p>
+                <p className="text-xs text-[#6B7280]">{role.description}</p>
               </div>
             </button>
           ))}
