@@ -7,7 +7,7 @@ import type { Invitation, Room } from '../types/database'
 export default function InvitePage() {
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
-  const { session, profile, loading: authLoading } = useAuth()
+  const { session, loading: authLoading } = useAuth()
   const [invitation, setInvitation] = useState<Invitation | null>(null)
   const [room, setRoom] = useState<Room | null>(null)
   const [status, setStatus] = useState<'loading' | 'valid' | 'invalid' | 'joining' | 'done'>('loading')
