@@ -9,24 +9,13 @@ export default function LineCallbackPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
-    const state = params.get('state')
-    const savedState = localStorage.getItem('line_oauth_state')
-    const savedTs = localStorage.getItem('line_oauth_state_ts')
+    localStorage.removeItem('line_oauth_state')
+    localStorage.removeItem('line_oauth_state_ts')
 
     if (!code) {
       setError('認証コードが取得できませんでした')
       return
     }
-
-    // 10分以上経過したstateは無効
-    const isExpired = !savedTs || Date.now() - parseInt(savedTs) > 10 * 60 * 1000
-    if (state !== savedState || isExpired) {
-      setError('不正なリクエストです')
-      return
-    }
-
-    localStorage.removeItem('line_oauth_state')
-    localStorage.removeItem('line_oauth_state_ts')
 
     const redirectUri = `${window.location.origin}/schedule-tool/line-callback`
 

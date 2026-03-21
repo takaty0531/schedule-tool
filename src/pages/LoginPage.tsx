@@ -4,8 +4,6 @@ import { supabase } from '../lib/supabase'
 
 function handleLineLogin() {
   const state = Math.random().toString(36).substring(2)
-  localStorage.setItem('line_oauth_state', state)
-  localStorage.setItem('line_oauth_state_ts', Date.now().toString())
   const redirectUri = `${window.location.origin}/schedule-tool/line-callback`
   const params = new URLSearchParams({
     response_type: 'code',
