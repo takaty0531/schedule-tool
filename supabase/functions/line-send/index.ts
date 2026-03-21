@@ -24,7 +24,6 @@ async function sendLineMessage(lineUserId: string, message: string) {
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
-  // JWT検証（先生のみ送信可能）
   const authHeader = req.headers.get('Authorization')
   if (!authHeader) {
     return new Response(JSON.stringify({ error: 'Unauthorized' }), {
@@ -47,7 +46,7 @@ Deno.serve(async (req) => {
     })
   }
 
-  const { room_id, message } = await req.json()
+  const { room_id, message, user_ids } = await req.json()
   if (!room_id || !message?.trim()) {
     return new Response(JSON.stringify({ error: 'room_id と message が必要です' }), {
       status: 400,
@@ -55,7 +54,6 @@ Deno.serve(async (req) => {
     })
   }
 
-  // Service role client で DB操作
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
@@ -75,18 +73,27 @@ Deno.serve(async (req) => {
     })
   }
 
-  // 受信者: room_members + 先生自身（LINE連携済みのみ）
+  // 受信者を取得（user_ids 指定があればそれを使用）
+  const { data: members } = await supabase
+    .from('room_members')
+    .select('learner_id')
+    .eq('room_id', room_id)
+
+  const allMemberIds = members?.map((m: { learner_id: string }) => m.learner_id) ?? []
+  const targetIds = Array.isArray(user_ids) && user_ids.length > 0
+    ? allMemberIds.filter((id: string) => user_ids.includes(id))
+    : allMemberIds
+
+  if (targetIds.length === 0) {
+    return new Response(JSON.stringify({ sent: 0 }), {
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    })
+  }
+
   const { data: recipients } = await supabase
     .from('profiles')
     .select('line_user_id')
-    .in(
-      'id',
-      (await supabase
-        .from('room_members')
-        .select('learner_id')
-        .eq('room_id', room_id)
-      ).data?.map((m: { learner_id: string }) => m.learner_id) ?? []
-    )
+    .in('id', targetIds)
     .not('line_user_id', 'is', null)
 
   if (!recipients || recipients.length === 0) {

@@ -151,13 +151,14 @@ export default function RoomPage() {
   const [lineMessage, setLineMessage] = useState('')
   const [lineSending, setLineSending] = useState(false)
   const [lineSent, setLineSent] = useState('')
+  const [selectedRecipients, setSelectedRecipients] = useState<Set<string>>(new Set())
 
   const handleLineSend = async () => {
-    if (!lineMessage.trim() || !id) return
+    if (!lineMessage.trim() || !id || selectedRecipients.size === 0) return
     setLineSending(true)
     setLineSent('')
     const { data, error } = await supabase.functions.invoke('line-send', {
-      body: { room_id: id, message: lineMessage.trim() },
+      body: { room_id: id, message: lineMessage.trim(), user_ids: [...selectedRecipients] },
     })
     setLineSending(false)
     if (error) {
@@ -189,6 +190,20 @@ export default function RoomPage() {
       if (error) throw error
       return data as (RoomMember & { profile: Profile })[]
     },
+  })
+
+  // LINE連携済みメンバー計算（members取得後に定義）
+  const lineMembers = members.filter(m => m.profile?.line_user_id)
+  const learnerIds = lineMembers.filter(m => m.profile?.role === 'learner').map(m => m.learner_id)
+  const guardianIds = lineMembers.filter(m => m.profile?.role === 'guardian').map(m => m.learner_id)
+  const allIds = lineMembers.map(m => m.learner_id)
+  const selectAll = () => setSelectedRecipients(new Set(allIds))
+  const selectLearners = () => setSelectedRecipients(new Set(learnerIds))
+  const selectGuardians = () => setSelectedRecipients(new Set(guardianIds))
+  const toggleRecipient = (uid: string) => setSelectedRecipients(prev => {
+    const next = new Set(prev)
+    next.has(uid) ? next.delete(uid) : next.add(uid)
+    return next
   })
 
   // 講師プロフィール
@@ -572,7 +587,73 @@ export default function RoomPage() {
                   <svg width="18" height="18" viewBox="0 0 48 48" fill="#06C755"><path d="M24 4C12.95 4 4 11.86 4 21.5c0 6.37 4.1 11.96 10.3 15.18-.45 1.68-1.63 6.1-1.87 7.05-.3 1.17.43 1.16 1.01.84.47-.27 7.43-4.91 10.44-6.9.69.1 1.4.15 2.12.15 11.05 0 20-7.86 20-17.5S35.05 4 24 4z"/></svg>
                   <h2 className="text-sm font-bold text-[#1B1B1B]">LINE連絡</h2>
                 </div>
-                <p className="text-xs text-[#9CA3AF]">LINE連携済みの生徒・保護者にメッセージを送信</p>
+
+                {/* クイック選択 */}
+                <div className="flex gap-2 flex-wrap">
+                  {[
+                    { label: '全員', action: selectAll, count: allIds.length },
+                    { label: '生徒全員', action: selectLearners, count: learnerIds.length },
+                    { label: '保護者全員', action: selectGuardians, count: guardianIds.length },
+                  ].map(({ label, action, count }) => (
+                    <button
+                      key={label}
+                      onClick={action}
+                      disabled={count === 0}
+                      className="text-xs px-3 py-1.5 rounded-full border border-[#52B788] text-[#2D6A4F] font-medium disabled:opacity-30 disabled:border-gray-200 disabled:text-gray-400 hover:bg-[#D8F3DC] transition-colors"
+                    >
+                      {label}（{count}名）
+                    </button>
+                  ))}
+                  <button
+                    onClick={() => setSelectedRecipients(new Set())}
+                    className="text-xs px-3 py-1.5 rounded-full border border-gray-200 text-[#6B7280] hover:bg-gray-50 transition-colors"
+                  >
+                    クリア
+                  </button>
+                </div>
+
+                {/* メンバーリスト */}
+                <div className="space-y-1.5">
+                  {members.map(m => {
+                    const hasLine = !!m.profile?.line_user_id
+                    const isSelected = selectedRecipients.has(m.learner_id)
+                    const roleLabel = m.profile?.role === 'guardian' ? '保護者' : '生徒'
+                    return (
+                      <button
+                        key={m.learner_id}
+                        onClick={() => hasLine && toggleRecipient(m.learner_id)}
+                        disabled={!hasLine}
+                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors text-left ${
+                          !hasLine ? 'opacity-40 cursor-not-allowed border-gray-100 bg-gray-50' :
+                          isSelected ? 'border-[#2D6A4F] bg-[#D8F3DC]' : 'border-gray-200 bg-white hover:bg-gray-50'
+                        }`}
+                      >
+                        {/* チェックボックス */}
+                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                          isSelected ? 'bg-[#2D6A4F] border-[#2D6A4F]' : 'border-gray-300'
+                        }`}>
+                          {isSelected && (
+                            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth={2}>
+                              <path d="M2 5l2.5 2.5L8 3" />
+                            </svg>
+                          )}
+                        </div>
+                        <span className="text-sm font-medium text-[#1B1B1B] flex-1">{m.display_name}</span>
+                        <span className="text-xs text-[#6B7280]">{roleLabel}</span>
+                        {hasLine ? (
+                          <span className="text-[10px] text-[#06C755] font-medium">LINE済</span>
+                        ) : (
+                          <span className="text-[10px] text-[#9CA3AF]">未連携</span>
+                        )}
+                      </button>
+                    )
+                  })}
+                  {members.length === 0 && (
+                    <p className="text-xs text-[#9CA3AF] text-center py-2">まだメンバーがいません</p>
+                  )}
+                </div>
+
+                {/* メッセージ入力 */}
                 <textarea
                   value={lineMessage}
                   onChange={e => { setLineMessage(e.target.value); setLineSent('') }}
@@ -586,13 +667,13 @@ export default function RoomPage() {
                 )}
                 <button
                   onClick={handleLineSend}
-                  disabled={lineSending || !lineMessage.trim()}
+                  disabled={lineSending || !lineMessage.trim() || selectedRecipients.size === 0}
                   className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white text-sm font-bold py-2.5 rounded-xl transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
                 >
                   {lineSending ? '送信中...' : (
                     <>
                       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                      LINEで送信
+                      {selectedRecipients.size > 0 ? `${selectedRecipients.size}名にLINEで送信` : 'LINEで送信'}
                     </>
                   )}
                 </button>
