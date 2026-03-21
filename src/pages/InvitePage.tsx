@@ -7,7 +7,7 @@ import type { Invitation, Room } from '../types/database'
 export default function InvitePage() {
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
-  const { session, profile } = useAuth()
+  const { session, profile, loading: authLoading } = useAuth()
   const [invitation, setInvitation] = useState<Invitation | null>(null)
   const [room, setRoom] = useState<Room | null>(null)
   const [status, setStatus] = useState<'loading' | 'valid' | 'invalid' | 'joining' | 'done'>('loading')
@@ -61,7 +61,7 @@ export default function InvitePage() {
     setTimeout(() => navigate(`/room/${invitation.room_id}`), 1500)
   }
 
-  if (status === 'loading') {
+  if (status === 'loading' || authLoading) {
     return (
       <div className="min-h-svh flex items-center justify-center bg-[#F7F9F7]">
         <div className="w-6 h-6 border-2 border-[#2D6A4F] border-t-transparent rounded-full animate-spin" />
@@ -72,7 +72,6 @@ export default function InvitePage() {
   if (status === 'invalid') {
     return (
       <div className="min-h-svh flex flex-col items-center justify-center bg-[#F7F9F7] px-6 text-center">
-        <p className="text-4xl mb-4">😔</p>
         <h2 className="text-xl font-bold text-[#1B1B1B]">招待リンクが無効です</h2>
         <p className="text-sm text-[#6B7280] mt-2">有効期限切れまたは使用済みです</p>
       </div>
@@ -82,7 +81,6 @@ export default function InvitePage() {
   if (status === 'done') {
     return (
       <div className="min-h-svh flex flex-col items-center justify-center bg-[#F7F9F7] px-6 text-center">
-        <p className="text-4xl mb-4">✅</p>
         <h2 className="text-xl font-bold text-[#1B1B1B]">参加しました！</h2>
         <p className="text-sm text-[#6B7280] mt-2">ルームに移動します...</p>
       </div>
@@ -93,7 +91,6 @@ export default function InvitePage() {
     <div className="min-h-svh flex flex-col items-center justify-center bg-[#F7F9F7] px-6">
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center">
-          <p className="text-4xl mb-3">📩</p>
           <h2 className="text-2xl font-bold text-[#1B1B1B]">招待が届いています</h2>
         </div>
 
