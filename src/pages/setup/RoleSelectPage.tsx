@@ -21,11 +21,13 @@ export default function RoleSelectPage() {
     if (!selected || !user) return
     setError('')
     setLoading(true)
-    const { error } = await supabase.from('profiles').insert({
-      id: user.id,
-      role: selected,
-      display_name: '',
-    })
+
+    // 既存プロフィールがあればroleだけ更新、なければ新規挿入
+    const { data: existing } = await supabase.from('profiles').select('id').eq('id', user.id).maybeSingle()
+    const { error } = existing
+      ? await supabase.from('profiles').update({ role: selected }).eq('id', user.id)
+      : await supabase.from('profiles').insert({ id: user.id, role: selected, display_name: '' })
+
     setLoading(false)
     if (error) {
       setError('保存に失敗しました。もう一度お試しください。')
