@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -11,7 +11,31 @@ import HomeworkTab from '../components/HomeworkTab'
 import type { Room, RoomMember, Profile, Invitation, Lesson } from '../types/database'
 import { minutesToTime } from '../lib/scheduleUtils'
 
-type Tab = 'detail' | 'schedule' | 'study_plan' | 'homework'
+type Tab = 'detail' | 'schedule' | 'study_plan' | 'homework' | 'notify'
+
+const DEFAULT_TEMPLATE = `📝 授業が完了しました！
+
+{授業日時}
+
+📚 宿題
+{宿題}
+
+📋 学習計画
+{学習計画}
+
+✏️ 授業記録
+{授業記録}
+
+📅 次回の授業
+{次回授業}`
+
+const TEMPLATE_VARS = [
+  { label: '授業日時', value: '{授業日時}' },
+  { label: '宿題', value: '{宿題}' },
+  { label: '次回授業', value: '{次回授業}' },
+  { label: '学習計画', value: '{学習計画}' },
+  { label: '授業記録', value: '{授業記録}' },
+]
 
 // トークン生成
 function generateToken() {
@@ -147,6 +171,27 @@ export default function RoomPage() {
   const [showInvite, setShowInvite] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('detail')
 
+  // テンプレートエディター
+  const templateRef = useRef<HTMLTextAreaElement>(null)
+  const [templateText, setTemplateText] = useState<string | null>(null)
+  const [templateSaved, setTemplateSaved] = useState(false)
+
+  // テンプレートにカーソル位置で変数を挿入
+  const insertVariable = (variable: string) => {
+    const el = templateRef.current
+    if (!el) return
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    const current = templateText ?? DEFAULT_TEMPLATE
+    const next = current.slice(0, start) + variable + current.slice(end)
+    setTemplateText(next)
+    // カーソルを挿入後の位置に戻す
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(start + variable.length, start + variable.length)
+    })
+  }
+
   // LINE連絡
   const [lineMessage, setLineMessage] = useState('')
   const [lineSending, setLineSending] = useState(false)
@@ -257,6 +302,7 @@ export default function RoomPage() {
         morning_time: string
         pre_lesson_notify: boolean
         pre_lesson_minutes: number
+        lesson_done_template: string | null
       } | null
     },
     enabled: profile?.role === 'instructor',
@@ -279,7 +325,11 @@ export default function RoomPage() {
 
   const { mutate: saveNotif, isPending: notifSaving } = useMutation({
     mutationFn: async () => {
-      const payload = { ...resolvedNotif, room_id: id! }
+      const payload = {
+        ...resolvedNotif,
+        room_id: id!,
+        lesson_done_template: templateText ?? notifSetting?.lesson_done_template ?? DEFAULT_TEMPLATE,
+      }
       if (notifSetting?.id) {
         const { error } = await supabase.from('notification_settings').update(payload).eq('id', notifSetting.id)
         if (error) throw error
@@ -288,7 +338,11 @@ export default function RoomPage() {
         if (error) throw error
       }
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notification_settings', id] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notification_settings', id] })
+      setTemplateSaved(true)
+      setTimeout(() => setTemplateSaved(false), 2000)
+    },
   })
 
   // 直近の宿題一覧（生徒・保護者向け）
@@ -354,7 +408,9 @@ export default function RoomPage() {
 
       {/* タブ */}
       <div className="bg-white border-b border-gray-200 flex overflow-x-auto">
-        {(['detail', 'schedule', 'study_plan', 'homework'] as Tab[]).map(tab => (
+        {((['detail', 'schedule', 'study_plan', 'homework'] as Tab[]).concat(
+          profile?.role === 'instructor' ? ['notify' as Tab] : []
+        )).map(tab => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -364,7 +420,7 @@ export default function RoomPage() {
                 : 'border-transparent text-[#6B7280]'
             }`}
           >
-            {tab === 'detail' ? '詳細' : tab === 'schedule' ? 'スケジュール' : tab === 'study_plan' ? '学習計画' : '宿題'}
+            {tab === 'detail' ? '詳細' : tab === 'schedule' ? 'スケジュール' : tab === 'study_plan' ? '学習計画' : tab === 'homework' ? '宿題' : '通知'}
           </button>
         ))}
       </div>
@@ -384,6 +440,236 @@ export default function RoomPage() {
           <HomeworkTab room={room} />
         </div>
       )}
+
+      {/* 通知タブ（先生専用） */}
+      {activeTab === 'notify' && profile?.role === 'instructor' && (
+        <div className="max-w-lg mx-auto px-4 py-6 space-y-5 overflow-y-auto" style={{ maxHeight: 'calc(100svh - 140px)' }}>
+
+          {/* 授業完了通知テンプレート */}
+          <div className="bg-white rounded-2xl p-4 space-y-3">
+            <h2 className="text-sm font-bold text-[#1B1B1B]">授業完了通知テンプレート</h2>
+            <p className="text-xs text-[#9CA3AF]">授業を「完了」にしたとき、生徒・保護者に自動送信されるメッセージ</p>
+
+            {/* 差し込み変数ボタン */}
+            <div>
+              <p className="text-xs text-[#6B7280] mb-2">差し込み変数（タップで挿入）</p>
+              <div className="flex flex-wrap gap-2">
+                {TEMPLATE_VARS.map(v => (
+                  <button
+                    key={v.value}
+                    onClick={() => insertVariable(v.value)}
+                    className="text-xs px-2.5 py-1 rounded-full bg-[#D8F3DC] text-[#2D6A4F] font-medium hover:bg-[#b7e4c7] transition-colors"
+                  >
+                    {v.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <textarea
+              ref={templateRef}
+              value={templateText ?? notifSetting?.lesson_done_template ?? DEFAULT_TEMPLATE}
+              onChange={e => setTemplateText(e.target.value)}
+              rows={12}
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788] resize-none font-mono"
+            />
+            <button
+              onClick={() => setTemplateText(DEFAULT_TEMPLATE)}
+              className="text-xs text-[#6B7280] underline"
+            >
+              デフォルトに戻す
+            </button>
+          </div>
+
+          {/* 定期通知設定 */}
+          <div className="bg-white rounded-2xl p-4 space-y-4">
+            <h2 className="text-sm font-bold text-[#1B1B1B]">定期通知設定</h2>
+
+            {/* 朝の通知 */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-[#1B1B1B]">朝の通知</span>
+                <button
+                  onClick={() => setNotifForm(prev => ({ ...resolvedNotif, ...prev, morning_notify: !resolvedNotif.morning_notify }))}
+                  className={`w-11 h-6 rounded-full transition-colors ${resolvedNotif.morning_notify ? 'bg-[#2D6A4F]' : 'bg-gray-200'}`}
+                >
+                  <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${resolvedNotif.morning_notify ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              {resolvedNotif.morning_notify && (
+                <div className="flex items-center gap-2 pl-1">
+                  <span className="text-xs text-[#6B7280]">通知時刻</span>
+                  <input
+                    type="time"
+                    value={resolvedNotif.morning_time}
+                    onChange={e => setNotifForm({ ...resolvedNotif, morning_time: e.target.value })}
+                    className="border border-gray-200 rounded-lg px-2 py-1 text-sm outline-none focus:border-[#52B788]"
+                  />
+                </div>
+              )}
+              <p className="text-xs text-[#9CA3AF] pl-1">授業当日の朝に宿題・学習計画を含む通知を送信</p>
+            </div>
+
+            {/* 授業前通知 */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-[#1B1B1B]">授業前通知</span>
+                <button
+                  onClick={() => setNotifForm({ ...resolvedNotif, pre_lesson_notify: !resolvedNotif.pre_lesson_notify })}
+                  className={`w-11 h-6 rounded-full transition-colors ${resolvedNotif.pre_lesson_notify ? 'bg-[#2D6A4F]' : 'bg-gray-200'}`}
+                >
+                  <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${resolvedNotif.pre_lesson_notify ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+              </div>
+              {resolvedNotif.pre_lesson_notify && (
+                <div className="flex items-center gap-2 pl-1">
+                  <span className="text-xs text-[#6B7280]">何分前</span>
+                  <select
+                    value={resolvedNotif.pre_lesson_minutes}
+                    onChange={e => setNotifForm({ ...resolvedNotif, pre_lesson_minutes: Number(e.target.value) })}
+                    className="border border-gray-200 rounded-lg px-2 py-1 text-sm outline-none focus:border-[#52B788]"
+                  >
+                    {[10, 15, 20, 30, 45, 60].map(m => (
+                      <option key={m} value={m}>{m}分前</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => saveNotif()}
+              disabled={notifSaving}
+              className="w-full bg-[#2D6A4F] hover:bg-[#245c43] text-white text-sm font-bold py-2.5 rounded-xl transition-colors disabled:opacity-40"
+            >
+              {notifSaving ? '保存中...' : templateSaved ? '保存しました ✓' : '設定を保存'}
+            </button>
+          </div>
+
+          {/* LINE連絡 */}
+          <div className="bg-white rounded-2xl p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <svg width="18" height="18" viewBox="0 0 48 48" fill="#06C755"><path d="M24 4C12.95 4 4 11.86 4 21.5c0 6.37 4.1 11.96 10.3 15.18-.45 1.68-1.63 6.1-1.87 7.05-.3 1.17.43 1.16 1.01.84.47-.27 7.43-4.91 10.44-6.9.69.1 1.4.15 2.12.15 11.05 0 20-7.86 20-17.5S35.05 4 24 4z"/></svg>
+              <h2 className="text-sm font-bold text-[#1B1B1B]">LINE連絡</h2>
+            </div>
+
+            {/* クイック選択 */}
+            <div className="flex gap-2 flex-wrap">
+              {[
+                { label: '全員', action: selectAll, count: allIds.length },
+                { label: '生徒全員', action: selectLearners, count: learnerIds.length },
+                { label: '保護者全員', action: selectGuardians, count: guardianIds.length },
+              ].map(({ label, action, count }) => (
+                <button
+                  key={label}
+                  onClick={action}
+                  disabled={count === 0}
+                  className="text-xs px-3 py-1.5 rounded-full border border-[#52B788] text-[#2D6A4F] font-medium disabled:opacity-30 disabled:border-gray-200 disabled:text-gray-400 hover:bg-[#D8F3DC] transition-colors"
+                >
+                  {label}（{count}名）
+                </button>
+              ))}
+              <button
+                onClick={() => setSelectedRecipients(new Set())}
+                className="text-xs px-3 py-1.5 rounded-full border border-gray-200 text-[#6B7280] hover:bg-gray-50 transition-colors"
+              >
+                クリア
+              </button>
+            </div>
+
+            {/* メンバーリスト */}
+            <div className="space-y-1.5">
+              {members.map(m => {
+                const hasLine = !!m.profile?.line_user_id
+                const isSelected = selectedRecipients.has(m.learner_id)
+                const roleLabel = m.profile?.role === 'guardian' ? '保護者' : '生徒'
+                return (
+                  <button
+                    key={m.learner_id}
+                    onClick={() => hasLine && toggleRecipient(m.learner_id)}
+                    disabled={!hasLine}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors text-left ${
+                      !hasLine ? 'opacity-40 cursor-not-allowed border-gray-100 bg-gray-50' :
+                      isSelected ? 'border-[#2D6A4F] bg-[#D8F3DC]' : 'border-gray-200 bg-white hover:bg-gray-50'
+                    }`}
+                  >
+                    <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                      isSelected ? 'bg-[#2D6A4F] border-[#2D6A4F]' : 'border-gray-300'
+                    }`}>
+                      {isSelected && (
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth={2}>
+                          <path d="M2 5l2.5 2.5L8 3" />
+                        </svg>
+                      )}
+                    </div>
+                    <span className="text-sm font-medium text-[#1B1B1B] flex-1">{m.display_name}</span>
+                    <span className="text-xs text-[#6B7280]">{roleLabel}</span>
+                    {hasLine ? (
+                      <span className="text-[10px] text-[#06C755] font-medium">LINE済</span>
+                    ) : (
+                      <span className="text-[10px] text-[#9CA3AF]">未連携</span>
+                    )}
+                  </button>
+                )
+              })}
+              {members.length === 0 && (
+                <p className="text-xs text-[#9CA3AF] text-center py-2">まだメンバーがいません</p>
+              )}
+            </div>
+
+            <textarea
+              value={lineMessage}
+              onChange={e => { setLineMessage(e.target.value); setLineSent('') }}
+              rows={3}
+              maxLength={500}
+              placeholder="メッセージを入力..."
+              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788] resize-none"
+            />
+            {lineSent && (
+              <p className={`text-xs ${lineSent.includes('失敗') ? 'text-red-500' : 'text-[#2D6A4F]'}`}>{lineSent}</p>
+            )}
+            <button
+              onClick={handleLineSend}
+              disabled={lineSending || !lineMessage.trim() || selectedRecipients.size === 0}
+              className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white text-sm font-bold py-2.5 rounded-xl transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+            >
+              {lineSending ? '送信中...' : (
+                <>
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                  {selectedRecipients.size > 0 ? `${selectedRecipients.size}名にLINEで送信` : 'LINEで送信'}
+                </>
+              )}
+            </button>
+          </div>
+
+          {/* LINE送信履歴 */}
+          {lineLogs.length > 0 && (
+            <div className="bg-white rounded-2xl p-4 space-y-3">
+              <h2 className="text-sm font-bold text-[#1B1B1B]">LINE送信履歴</h2>
+              <div className="space-y-2">
+                {lineLogs.map((log: { id: string; type: string; created_at: string; sent_count: number; message: string }) => {
+                  const d = new Date(log.created_at)
+                  const typeLabel = log.type === 'lesson_done' ? '授業完了通知' : '手動送信'
+                  const typeColor = log.type === 'lesson_done' ? 'text-[#2D6A4F] bg-[#D8F3DC]' : 'text-[#6B7280] bg-gray-100'
+                  return (
+                    <div key={log.id} className="border border-gray-100 rounded-xl p-3 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${typeColor}`}>{typeLabel}</span>
+                        <span className="text-[10px] text-[#9CA3AF]">
+                          {d.getMonth()+1}/{d.getDate()} {d.getHours()}:{String(d.getMinutes()).padStart(2,'0')} · {log.sent_count}名
+                        </span>
+                      </div>
+                      <p className="text-xs text-[#6B7280] line-clamp-2">{log.message}</p>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+        </div>
+      )}
+
       {activeTab === 'detail' && (() => {
         const COLORS = ['#3B82F6','#CA8A04','#DB2777','#7C3AED','#EA580C']
         const learnerIdList = members.map(m => m.learner_id)
@@ -601,194 +887,6 @@ export default function RoomPage() {
           {/* 先生専用セクション */}
           {profile?.role === 'instructor' && (
             <>
-              {/* LINE通知設定 */}
-              <div className="bg-white rounded-2xl p-4 space-y-4">
-                <h2 className="text-sm font-bold text-[#1B1B1B]">LINE通知設定</h2>
-
-                {/* 朝の通知 */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-[#1B1B1B]">朝の通知</span>
-                    <button
-                      onClick={() => setNotifForm(prev => ({ ...resolvedNotif, ...prev, morning_notify: !resolvedNotif.morning_notify }))}
-                      className={`w-11 h-6 rounded-full transition-colors ${resolvedNotif.morning_notify ? 'bg-[#2D6A4F]' : 'bg-gray-200'}`}
-                    >
-                      <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${resolvedNotif.morning_notify ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-                  {resolvedNotif.morning_notify && (
-                    <div className="flex items-center gap-2 pl-1">
-                      <span className="text-xs text-[#6B7280]">通知時刻</span>
-                      <input
-                        type="time"
-                        value={resolvedNotif.morning_time}
-                        onChange={e => setNotifForm({ ...resolvedNotif, morning_time: e.target.value })}
-                        className="border border-gray-200 rounded-lg px-2 py-1 text-sm outline-none focus:border-[#52B788]"
-                      />
-                    </div>
-                  )}
-                  <p className="text-xs text-[#9CA3AF] pl-1">授業当日の朝に宿題・学習計画を含む通知を送信</p>
-                </div>
-
-                {/* 授業前通知 */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-[#1B1B1B]">授業前通知</span>
-                    <button
-                      onClick={() => setNotifForm({ ...resolvedNotif, pre_lesson_notify: !resolvedNotif.pre_lesson_notify })}
-                      className={`w-11 h-6 rounded-full transition-colors ${resolvedNotif.pre_lesson_notify ? 'bg-[#2D6A4F]' : 'bg-gray-200'}`}
-                    >
-                      <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${resolvedNotif.pre_lesson_notify ? 'translate-x-5' : 'translate-x-0'}`} />
-                    </button>
-                  </div>
-                  {resolvedNotif.pre_lesson_notify && (
-                    <div className="flex items-center gap-2 pl-1">
-                      <span className="text-xs text-[#6B7280]">何分前</span>
-                      <select
-                        value={resolvedNotif.pre_lesson_minutes}
-                        onChange={e => setNotifForm({ ...resolvedNotif, pre_lesson_minutes: Number(e.target.value) })}
-                        className="border border-gray-200 rounded-lg px-2 py-1 text-sm outline-none focus:border-[#52B788]"
-                      >
-                        {[10, 15, 20, 30, 45, 60].map(m => (
-                          <option key={m} value={m}>{m}分前</option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
-
-                <button
-                  onClick={() => saveNotif()}
-                  disabled={notifSaving}
-                  className="w-full bg-[#2D6A4F] hover:bg-[#245c43] text-white text-sm font-bold py-2.5 rounded-xl transition-colors disabled:opacity-40"
-                >
-                  {notifSaving ? '保存中...' : '通知設定を保存'}
-                </button>
-              </div>
-
-              {/* LINE連絡 */}
-              <div className="bg-white rounded-2xl p-4 space-y-3">
-                <div className="flex items-center gap-2">
-                  <svg width="18" height="18" viewBox="0 0 48 48" fill="#06C755"><path d="M24 4C12.95 4 4 11.86 4 21.5c0 6.37 4.1 11.96 10.3 15.18-.45 1.68-1.63 6.1-1.87 7.05-.3 1.17.43 1.16 1.01.84.47-.27 7.43-4.91 10.44-6.9.69.1 1.4.15 2.12.15 11.05 0 20-7.86 20-17.5S35.05 4 24 4z"/></svg>
-                  <h2 className="text-sm font-bold text-[#1B1B1B]">LINE連絡</h2>
-                </div>
-
-                {/* クイック選択 */}
-                <div className="flex gap-2 flex-wrap">
-                  {[
-                    { label: '全員', action: selectAll, count: allIds.length },
-                    { label: '生徒全員', action: selectLearners, count: learnerIds.length },
-                    { label: '保護者全員', action: selectGuardians, count: guardianIds.length },
-                  ].map(({ label, action, count }) => (
-                    <button
-                      key={label}
-                      onClick={action}
-                      disabled={count === 0}
-                      className="text-xs px-3 py-1.5 rounded-full border border-[#52B788] text-[#2D6A4F] font-medium disabled:opacity-30 disabled:border-gray-200 disabled:text-gray-400 hover:bg-[#D8F3DC] transition-colors"
-                    >
-                      {label}（{count}名）
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => setSelectedRecipients(new Set())}
-                    className="text-xs px-3 py-1.5 rounded-full border border-gray-200 text-[#6B7280] hover:bg-gray-50 transition-colors"
-                  >
-                    クリア
-                  </button>
-                </div>
-
-                {/* メンバーリスト */}
-                <div className="space-y-1.5">
-                  {members.map(m => {
-                    const hasLine = !!m.profile?.line_user_id
-                    const isSelected = selectedRecipients.has(m.learner_id)
-                    const roleLabel = m.profile?.role === 'guardian' ? '保護者' : '生徒'
-                    return (
-                      <button
-                        key={m.learner_id}
-                        onClick={() => hasLine && toggleRecipient(m.learner_id)}
-                        disabled={!hasLine}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-colors text-left ${
-                          !hasLine ? 'opacity-40 cursor-not-allowed border-gray-100 bg-gray-50' :
-                          isSelected ? 'border-[#2D6A4F] bg-[#D8F3DC]' : 'border-gray-200 bg-white hover:bg-gray-50'
-                        }`}
-                      >
-                        {/* チェックボックス */}
-                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
-                          isSelected ? 'bg-[#2D6A4F] border-[#2D6A4F]' : 'border-gray-300'
-                        }`}>
-                          {isSelected && (
-                            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="white" strokeWidth={2}>
-                              <path d="M2 5l2.5 2.5L8 3" />
-                            </svg>
-                          )}
-                        </div>
-                        <span className="text-sm font-medium text-[#1B1B1B] flex-1">{m.display_name}</span>
-                        <span className="text-xs text-[#6B7280]">{roleLabel}</span>
-                        {hasLine ? (
-                          <span className="text-[10px] text-[#06C755] font-medium">LINE済</span>
-                        ) : (
-                          <span className="text-[10px] text-[#9CA3AF]">未連携</span>
-                        )}
-                      </button>
-                    )
-                  })}
-                  {members.length === 0 && (
-                    <p className="text-xs text-[#9CA3AF] text-center py-2">まだメンバーがいません</p>
-                  )}
-                </div>
-
-                {/* メッセージ入力 */}
-                <textarea
-                  value={lineMessage}
-                  onChange={e => { setLineMessage(e.target.value); setLineSent('') }}
-                  rows={3}
-                  maxLength={500}
-                  placeholder="メッセージを入力..."
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788] resize-none"
-                />
-                {lineSent && (
-                  <p className={`text-xs ${lineSent.includes('失敗') ? 'text-red-500' : 'text-[#2D6A4F]'}`}>{lineSent}</p>
-                )}
-                <button
-                  onClick={handleLineSend}
-                  disabled={lineSending || !lineMessage.trim() || selectedRecipients.size === 0}
-                  className="w-full bg-[#06C755] hover:bg-[#05b34c] text-white text-sm font-bold py-2.5 rounded-xl transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
-                >
-                  {lineSending ? '送信中...' : (
-                    <>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
-                      {selectedRecipients.size > 0 ? `${selectedRecipients.size}名にLINEで送信` : 'LINEで送信'}
-                    </>
-                  )}
-                </button>
-              </div>
-
-              {/* LINE通知履歴 */}
-              {lineLogs.length > 0 && (
-                <div className="bg-white rounded-2xl p-4 space-y-3">
-                  <h2 className="text-sm font-bold text-[#1B1B1B]">LINE送信履歴</h2>
-                  <div className="space-y-2">
-                    {lineLogs.map((log: { id: string; type: string; created_at: string; sent_count: number; message: string }) => {
-                      const d = new Date(log.created_at)
-                      const typeLabel = log.type === 'lesson_done' ? '授業完了通知' : '手動送信'
-                      const typeColor = log.type === 'lesson_done' ? 'text-[#2D6A4F] bg-[#D8F3DC]' : 'text-[#6B7280] bg-gray-100'
-                      return (
-                        <div key={log.id} className="border border-gray-100 rounded-xl p-3 space-y-1">
-                          <div className="flex items-center justify-between">
-                            <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${typeColor}`}>{typeLabel}</span>
-                            <span className="text-[10px] text-[#9CA3AF]">
-                              {d.getMonth()+1}/{d.getDate()} {d.getHours()}:{String(d.getMinutes()).padStart(2,'0')} · {log.sent_count}名
-                            </span>
-                          </div>
-                          <p className="text-xs text-[#6B7280] line-clamp-2">{log.message}</p>
-                        </div>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
-
               {/* 招待ボタン */}
               <button
                 onClick={() => setShowInvite(true)}
