@@ -10,6 +10,7 @@ import SettingsPage from './pages/SettingsPage'
 import ForgotPasswordPage from './pages/ForgotPasswordPage'
 import ResetPasswordPage from './pages/ResetPasswordPage'
 import LessonDetailPage from './pages/LessonDetailPage'
+import LineCallbackPage from './pages/LineCallbackPage'
 import RoleSelectPage from './pages/setup/RoleSelectPage'
 import ProfileSetupPage from './pages/setup/ProfileSetupPage'
 
@@ -51,6 +52,7 @@ function AppRoutes() {
       <Route path="/room/:id" element={<ProfileRoute><RoomPage /></ProfileRoute>} />
       <Route path="/room/:id/lesson/:lid" element={<ProfileRoute><LessonDetailPage /></ProfileRoute>} />
       <Route path="/invite/:token" element={<InvitePage />} />
+      <Route path="/line-callback" element={<LineCallbackPage />} />
       <Route path="/forgot-password" element={<PublicRoute><ForgotPasswordPage /></PublicRoute>} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/settings" element={<ProfileRoute><SettingsPage /></ProfileRoute>} />

@@ -1,3 +1,8 @@
+# 機密情報（コミット禁止）
+.mcp.json
+.env
+.env.*
+
 # Logs
 logs
 *.log

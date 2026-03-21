@@ -2,6 +2,20 @@ import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
+function handleLineLogin() {
+  const state = Math.random().toString(36).substring(2)
+  sessionStorage.setItem('line_oauth_state', state)
+  const redirectUri = `${window.location.origin}/schedule-tool/line-callback`
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: import.meta.env.VITE_LINE_CHANNEL_ID,
+    redirect_uri: redirectUri,
+    state,
+    scope: 'profile openid',
+  })
+  window.location.href = `https://access.line.me/oauth2/v2.1/authorize?${params}`
+}
+
 export default function LoginPage() {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
@@ -77,6 +91,25 @@ export default function LoginPage() {
               {loading ? 'ログイン中...' : 'ログイン'}
             </button>
           </form>
+
+          {/* LINE ログインボタン */}
+          <div className="mt-5">
+            <div className="relative flex items-center">
+              <div className="flex-1 border-t border-gray-200" />
+              <span className="px-3 text-xs text-[#9CA3AF]">または</span>
+              <div className="flex-1 border-t border-gray-200" />
+            </div>
+            <button
+              type="button"
+              onClick={handleLineLogin}
+              className="mt-4 w-full flex items-center justify-center gap-3 bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-2xl transition-colors"
+            >
+              <svg width="22" height="22" viewBox="0 0 48 48" fill="white">
+                <path d="M24 4C12.95 4 4 11.86 4 21.5c0 6.37 4.1 11.96 10.3 15.18-.45 1.68-1.63 6.1-1.87 7.05-.3 1.17.43 1.16 1.01.84.47-.27 7.43-4.91 10.44-6.9.69.1 1.4.15 2.12.15 11.05 0 20-7.86 20-17.5S35.05 4 24 4z"/>
+              </svg>
+              LINEでログイン
+            </button>
+          </div>
 
           <div className="mt-6 space-y-2 text-center text-sm text-[#6B7280]">
             <p>
