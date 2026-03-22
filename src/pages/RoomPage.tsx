@@ -196,6 +196,7 @@ export default function RoomPage() {
   const { profile } = useAuth()
   const queryClient = useQueryClient()
   const [showInvite, setShowInvite] = useState(false)
+  const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'member' | 'invitation'; id: string; name: string } | null>(null)
   const initialTab = (searchParams.get('tab') as Tab | null) ?? 'detail'
   const [activeTab, setActiveTab] = useState<Tab>(
     initialTab === 'notify' || initialTab === 'schedule' || initialTab === 'study_plan' || initialTab === 'homework'
@@ -414,6 +415,30 @@ export default function RoomPage() {
       return data as Invitation[]
     },
     enabled: profile?.role === 'instructor',
+  })
+
+  // 招待削除
+  const deleteInvitationMutation = useMutation({
+    mutationFn: async (invitationId: string) => {
+      const { error } = await supabase.from('invitations').delete().eq('id', invitationId)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['invitations', id] })
+      setDeleteConfirm(null)
+    },
+  })
+
+  // メンバー削除
+  const deleteMemberMutation = useMutation({
+    mutationFn: async (memberId: string) => {
+      const { error } = await supabase.from('room_members').delete().eq('id', memberId)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['members', id] })
+      setDeleteConfirm(null)
+    },
   })
 
   if (!room) return null
@@ -1011,9 +1036,20 @@ export default function RoomPage() {
                       <Avatar avatarUrl={m.profile.avatar_url} displayName={m.display_name} size={40} />
                       <div className="flex-1">
                         <p className="font-medium text-[#1B1B1B]">{m.display_name}</p>
-                        <p className="text-xs text-[#6B7280]">生徒</p>
+                        <p className="text-xs text-[#6B7280]">{m.profile?.role === 'guardian' ? '保護者' : '生徒'}</p>
                       </div>
                       <span className="w-3 h-3 rounded-full" style={{ background: COLORS[ci] }} />
+                      {profile?.role === 'instructor' && (
+                        <button
+                          onClick={() => setDeleteConfirm({ type: 'member', id: m.id, name: m.display_name })}
+                          className="ml-1 p-1.5 rounded-full text-[#9CA3AF] hover:text-red-500 hover:bg-red-50 transition-colors"
+                          aria-label="メンバーを削除"
+                        >
+                          <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
                     </div>
                   )
                 })}
@@ -1032,7 +1068,18 @@ export default function RoomPage() {
                       <p className="font-medium text-[#1B1B1B]">{inv.display_name}</p>
                       <p className="text-xs text-[#6B7280]">{inv.role === 'learner' ? '生徒' : '保護者'} • 招待中</p>
                     </div>
-                    <span className="text-xs bg-[#D8F3DC] text-[#2D6A4F] px-2 py-1 rounded-full">pending</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs bg-[#D8F3DC] text-[#2D6A4F] px-2 py-1 rounded-full">pending</span>
+                      <button
+                        onClick={() => setDeleteConfirm({ type: 'invitation', id: inv.id, name: inv.display_name })}
+                        className="p-1.5 rounded-full text-[#9CA3AF] hover:text-red-500 hover:bg-red-50 transition-colors"
+                        aria-label="招待を削除"
+                      >
+                        <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -1062,6 +1109,42 @@ export default function RoomPage() {
       {showInvite && room && (
         <InviteModal room={room} members={members} onClose={() => setShowInvite(false)} />
       )}
+
+      {/* 削除確認ダイアログ */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4" onClick={() => setDeleteConfirm(null)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm space-y-4" onClick={e => e.stopPropagation()}>
+            <h2 className="text-base font-bold text-[#1B1B1B]">
+              {deleteConfirm.type === 'member' ? 'メンバーを削除' : '招待を削除'}
+            </h2>
+            <p className="text-sm text-[#6B7280]">
+              「{deleteConfirm.name}」を{deleteConfirm.type === 'member' ? 'このルームから削除' : 'の招待をキャンセル'}しますか？この操作は取り消せません。
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-[#6B7280]"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={() => {
+                  if (deleteConfirm.type === 'member') {
+                    deleteMemberMutation.mutate(deleteConfirm.id)
+                  } else {
+                    deleteInvitationMutation.mutate(deleteConfirm.id)
+                  }
+                }}
+                disabled={deleteMemberMutation.isPending || deleteInvitationMutation.isPending}
+                className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors disabled:opacity-50"
+              >
+                削除する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <BottomNav />
     </div>
   )
