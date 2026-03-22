@@ -142,7 +142,7 @@ export default function LessonDetailPage() {
       })
       if (dbError) throw dbError
       queryClient.invalidateQueries({ queryKey: ['lesson_files', lessonId] })
-    } catch (err) {
+    } catch {
       alert('アップロードに失敗しました')
     } finally {
       setUploadingFile(false)

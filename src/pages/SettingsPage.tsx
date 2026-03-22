@@ -1,8 +1,10 @@
 import { useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '../lib/auth'
 import { supabase } from '../lib/supabase'
 import BottomNav from '../components/BottomNav'
+import type { Room } from '../types/database'
 
 const ROLE_LABEL: Record<string, string> = {
   instructor: '先生',
@@ -21,6 +23,20 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const { data: instructorRooms = [] } = useQuery({
+    queryKey: ['rooms', 'instructor', user?.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('rooms')
+        .select('*')
+        .eq('instructor_id', user!.id)
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      return data as Room[]
+    },
+    enabled: profile?.role === 'instructor' && !!user,
+  })
 
   // アバター画像 URL（公開バケット）
   const currentAvatarUrl = profile?.avatar_url
@@ -176,6 +192,29 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* 通知設定（講師のみ） */}
+        {profile?.role === 'instructor' && (
+          <div className="bg-white rounded-2xl p-5 space-y-3">
+            <h2 className="text-sm font-bold text-[#1B1B1B]">通知設定（ルーム別）</h2>
+            {instructorRooms.length === 0 ? (
+              <p className="text-xs text-[#9CA3AF]">ルーム作成後に通知設定できます</p>
+            ) : (
+              <div className="space-y-2">
+                {instructorRooms.map((room) => (
+                  <button
+                    key={room.id}
+                    onClick={() => navigate(`/room/${room.id}?tab=notify`)}
+                    className="w-full bg-[#F7F9F7] rounded-xl px-3 py-2.5 flex items-center justify-between text-left"
+                  >
+                    <span className="text-sm text-[#1B1B1B]">{room.name}</span>
+                    <span className="text-xs text-[#52B788]">設定へ</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ログアウト */}
         <button

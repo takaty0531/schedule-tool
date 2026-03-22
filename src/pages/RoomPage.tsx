@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
@@ -13,7 +13,7 @@ import { minutesToTime } from '../lib/scheduleUtils'
 
 type Tab = 'detail' | 'schedule' | 'study_plan' | 'homework' | 'notify'
 
-const DEFAULT_TEMPLATE = `📝 授業が完了しました！
+const DEFAULT_LESSON_DONE_TEMPLATE = `📝 授業が完了しました！
 
 {授業日時}
 
@@ -29,12 +29,38 @@ const DEFAULT_TEMPLATE = `📝 授業が完了しました！
 📅 次回の授業
 {次回授業}`
 
-const TEMPLATE_VARS = [
+const DEFAULT_MORNING_TEMPLATE = `おはようございます！
+本日 {授業時刻} から「{ルーム名}」の授業があります。
+
+📚 宿題
+{宿題}
+
+📋 学習計画
+{学習計画}`
+
+const DEFAULT_PRE_LESSON_TEMPLATE = `⏰ {残り時間}分後に「{ルーム名}」の授業が始まります！
+
+📅 {授業日時}`
+
+const LESSON_DONE_VARS = [
   { label: '授業日時', value: '{授業日時}' },
   { label: '宿題', value: '{宿題}' },
   { label: '次回授業', value: '{次回授業}' },
   { label: '学習計画', value: '{学習計画}' },
   { label: '授業記録', value: '{授業記録}' },
+]
+
+const MORNING_VARS = [
+  { label: 'ルーム名', value: '{ルーム名}' },
+  { label: '授業時刻', value: '{授業時刻}' },
+  { label: '宿題', value: '{宿題}' },
+  { label: '学習計画', value: '{学習計画}' },
+]
+
+const PRE_LESSON_VARS = [
+  { label: 'ルーム名', value: '{ルーム名}' },
+  { label: '授業日時', value: '{授業日時}' },
+  { label: '残り時間', value: '{残り時間}' },
 ]
 
 // トークン生成
@@ -166,31 +192,27 @@ function InviteModal({ room, members, onClose }: { room: Room; members: (RoomMem
 export default function RoomPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const { profile } = useAuth()
   const queryClient = useQueryClient()
   const [showInvite, setShowInvite] = useState(false)
-  const [activeTab, setActiveTab] = useState<Tab>('detail')
+  const initialTab = (searchParams.get('tab') as Tab | null) ?? 'detail'
+  const [activeTab, setActiveTab] = useState<Tab>(
+    initialTab === 'notify' || initialTab === 'schedule' || initialTab === 'study_plan' || initialTab === 'homework'
+      ? initialTab
+      : 'detail'
+  )
 
   // テンプレートエディター
-  const templateRef = useRef<HTMLTextAreaElement>(null)
-  const [templateText, setTemplateText] = useState<string | null>(null)
+  const lessonDoneRef = useRef<HTMLTextAreaElement>(null)
+  const morningRef = useRef<HTMLTextAreaElement>(null)
+  const preLessonRef = useRef<HTMLTextAreaElement>(null)
+  const [lessonDoneText, setLessonDoneText] = useState<string | null>(null)
+  const [morningText, setMorningText] = useState<string | null>(null)
+  const [preLessonText, setPreLessonText] = useState<string | null>(null)
   const [templateSaved, setTemplateSaved] = useState(false)
-
-  // テンプレートにカーソル位置で変数を挿入
-  const insertVariable = (variable: string) => {
-    const el = templateRef.current
-    if (!el) return
-    const start = el.selectionStart ?? 0
-    const end = el.selectionEnd ?? 0
-    const current = templateText ?? DEFAULT_TEMPLATE
-    const next = current.slice(0, start) + variable + current.slice(end)
-    setTemplateText(next)
-    // カーソルを挿入後の位置に戻す
-    requestAnimationFrame(() => {
-      el.focus()
-      el.setSelectionRange(start + variable.length, start + variable.length)
-    })
-  }
+  // 展開中の通知タイプ
+  const [expandedNotif, setExpandedNotif] = useState<'lesson_done' | 'morning' | 'pre_lesson' | null>(null)
 
   // LINE連絡
   const [lineMessage, setLineMessage] = useState('')
@@ -247,7 +269,8 @@ export default function RoomPage() {
   const selectGuardians = () => setSelectedRecipients(new Set(guardianIds))
   const toggleRecipient = (uid: string) => setSelectedRecipients(prev => {
     const next = new Set(prev)
-    next.has(uid) ? next.delete(uid) : next.add(uid)
+    if (next.has(uid)) next.delete(uid)
+    else next.add(uid)
     return next
   })
 
@@ -303,6 +326,8 @@ export default function RoomPage() {
         pre_lesson_notify: boolean
         pre_lesson_minutes: number
         lesson_done_template: string | null
+        morning_template: string | null
+        pre_lesson_template: string | null
       } | null
     },
     enabled: profile?.role === 'instructor',
@@ -328,7 +353,9 @@ export default function RoomPage() {
       const payload = {
         ...resolvedNotif,
         room_id: id!,
-        lesson_done_template: templateText ?? notifSetting?.lesson_done_template ?? DEFAULT_TEMPLATE,
+        lesson_done_template: lessonDoneText ?? notifSetting?.lesson_done_template ?? DEFAULT_LESSON_DONE_TEMPLATE,
+        morning_template: morningText ?? notifSetting?.morning_template ?? DEFAULT_MORNING_TEMPLATE,
+        pre_lesson_template: preLessonText ?? notifSetting?.pre_lesson_template ?? DEFAULT_PRE_LESSON_TEMPLATE,
       }
       if (notifSetting?.id) {
         const { error } = await supabase.from('notification_settings').update(payload).eq('id', notifSetting.id)
@@ -391,6 +418,46 @@ export default function RoomPage() {
 
   if (!room) return null
 
+  const insertLessonDone = (variable: string) => {
+    const el = lessonDoneRef.current
+    if (!el) return
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    const base = lessonDoneText ?? notifSetting?.lesson_done_template ?? DEFAULT_LESSON_DONE_TEMPLATE
+    const next = base.slice(0, start) + variable + base.slice(end)
+    setLessonDoneText(next)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(start + variable.length, start + variable.length)
+    })
+  }
+  const insertMorning = (variable: string) => {
+    const el = morningRef.current
+    if (!el) return
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    const base = morningText ?? notifSetting?.morning_template ?? DEFAULT_MORNING_TEMPLATE
+    const next = base.slice(0, start) + variable + base.slice(end)
+    setMorningText(next)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(start + variable.length, start + variable.length)
+    })
+  }
+  const insertPreLesson = (variable: string) => {
+    const el = preLessonRef.current
+    if (!el) return
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    const base = preLessonText ?? notifSetting?.pre_lesson_template ?? DEFAULT_PRE_LESSON_TEMPLATE
+    const next = base.slice(0, start) + variable + base.slice(end)
+    setPreLessonText(next)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(start + variable.length, start + variable.length)
+    })
+  }
+
   return (
     <div className="min-h-svh bg-[#F7F9F7] pb-20">
       {/* ヘッダー */}
@@ -445,105 +512,180 @@ export default function RoomPage() {
       {activeTab === 'notify' && profile?.role === 'instructor' && (
         <div className="max-w-lg mx-auto px-4 py-6 space-y-5 overflow-y-auto" style={{ maxHeight: 'calc(100svh - 140px)' }}>
 
-          {/* 授業完了通知テンプレート */}
-          <div className="bg-white rounded-2xl p-4 space-y-3">
-            <h2 className="text-sm font-bold text-[#1B1B1B]">授業完了通知テンプレート</h2>
-            <p className="text-xs text-[#9CA3AF]">授業を「完了」にしたとき、生徒・保護者に自動送信されるメッセージ</p>
-
-            {/* 差し込み変数ボタン */}
-            <div>
-              <p className="text-xs text-[#6B7280] mb-2">差し込み変数（タップで挿入）</p>
-              <div className="flex flex-wrap gap-2">
-                {TEMPLATE_VARS.map(v => (
-                  <button
-                    key={v.value}
-                    onClick={() => insertVariable(v.value)}
-                    className="text-xs px-2.5 py-1 rounded-full bg-[#D8F3DC] text-[#2D6A4F] font-medium hover:bg-[#b7e4c7] transition-colors"
-                  >
-                    {v.label}
-                  </button>
-                ))}
-              </div>
+          {/* 定期通知設定 */}
+          <div className="bg-white rounded-2xl overflow-hidden">
+            <div className="px-4 pt-4 pb-3 border-b border-gray-100">
+              <h2 className="text-sm font-bold text-[#1B1B1B]">定期通知設定</h2>
             </div>
 
-            <textarea
-              ref={templateRef}
-              value={templateText ?? notifSetting?.lesson_done_template ?? DEFAULT_TEMPLATE}
-              onChange={e => setTemplateText(e.target.value)}
-              rows={12}
-              className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788] resize-none font-mono"
-            />
-            <button
-              onClick={() => setTemplateText(DEFAULT_TEMPLATE)}
-              className="text-xs text-[#6B7280] underline"
-            >
-              デフォルトに戻す
-            </button>
-          </div>
-
-          {/* 定期通知設定 */}
-          <div className="bg-white rounded-2xl p-4 space-y-4">
-            <h2 className="text-sm font-bold text-[#1B1B1B]">定期通知設定</h2>
-
             {/* 朝の通知 */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-[#1B1B1B]">朝の通知</span>
-                <button
-                  onClick={() => setNotifForm(prev => ({ ...resolvedNotif, ...prev, morning_notify: !resolvedNotif.morning_notify }))}
-                  className={`w-11 h-6 rounded-full transition-colors ${resolvedNotif.morning_notify ? 'bg-[#2D6A4F]' : 'bg-gray-200'}`}
-                >
-                  <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${resolvedNotif.morning_notify ? 'translate-x-5' : 'translate-x-0'}`} />
-                </button>
-              </div>
-              {resolvedNotif.morning_notify && (
-                <div className="flex items-center gap-2 pl-1">
-                  <span className="text-xs text-[#6B7280]">通知時刻</span>
-                  <input
-                    type="time"
-                    value={resolvedNotif.morning_time}
-                    onChange={e => setNotifForm({ ...resolvedNotif, morning_time: e.target.value })}
-                    className="border border-gray-200 rounded-lg px-2 py-1 text-sm outline-none focus:border-[#52B788]"
+            <div className="border-b border-gray-100">
+              <button
+                onClick={() => setExpandedNotif(expandedNotif === 'morning' ? null : 'morning')}
+                className="w-full flex items-center justify-between px-4 py-3.5"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-base">🌅</span>
+                  <div className="text-left">
+                    <p className="text-sm font-medium text-[#1B1B1B]">朝の通知</p>
+                    <p className="text-[11px] text-[#9CA3AF]">授業当日の朝に送信</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div
+                    onClick={e => { e.stopPropagation(); setNotifForm({ ...resolvedNotif, morning_notify: !resolvedNotif.morning_notify }) }}
+                    className={`w-10 h-5 rounded-full transition-colors flex items-center ${resolvedNotif.morning_notify ? 'bg-[#2D6A4F]' : 'bg-gray-200'}`}
+                  >
+                    <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${resolvedNotif.morning_notify ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </div>
+                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#9CA3AF" strokeWidth={2} className={`transition-transform ${expandedNotif === 'morning' ? 'rotate-180' : ''}`}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </button>
+              {expandedNotif === 'morning' && (
+                <div className="px-4 pb-4 space-y-3">
+                  {resolvedNotif.morning_notify && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-[#6B7280]">通知時刻</span>
+                      <input
+                        type="time"
+                        value={resolvedNotif.morning_time}
+                        onChange={e => setNotifForm({ ...resolvedNotif, morning_time: e.target.value })}
+                        className="border border-gray-200 rounded-lg px-2 py-1 text-sm outline-none focus:border-[#52B788]"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-xs text-[#6B7280] mb-2">差し込み変数（タップで挿入）</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {MORNING_VARS.map(v => (
+                        <button key={v.value} onClick={() => insertMorning(v.value)} className="text-xs px-2.5 py-1 rounded-full bg-[#D8F3DC] text-[#2D6A4F] font-medium hover:bg-[#b7e4c7] transition-colors">{v.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <textarea
+                    ref={morningRef}
+                    value={morningText ?? notifSetting?.morning_template ?? DEFAULT_MORNING_TEMPLATE}
+                    onChange={e => setMorningText(e.target.value)}
+                    rows={8}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#52B788] resize-none font-mono"
                   />
+                  <button onClick={() => setMorningText(DEFAULT_MORNING_TEMPLATE)} className="text-xs text-[#6B7280] underline">デフォルトに戻す</button>
                 </div>
               )}
-              <p className="text-xs text-[#9CA3AF] pl-1">授業当日の朝に宿題・学習計画を含む通知を送信</p>
             </div>
 
             {/* 授業前通知 */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-[#1B1B1B]">授業前通知</span>
-                <button
-                  onClick={() => setNotifForm({ ...resolvedNotif, pre_lesson_notify: !resolvedNotif.pre_lesson_notify })}
-                  className={`w-11 h-6 rounded-full transition-colors ${resolvedNotif.pre_lesson_notify ? 'bg-[#2D6A4F]' : 'bg-gray-200'}`}
-                >
-                  <div className={`w-5 h-5 bg-white rounded-full shadow transition-transform mx-0.5 ${resolvedNotif.pre_lesson_notify ? 'translate-x-5' : 'translate-x-0'}`} />
-                </button>
-              </div>
-              {resolvedNotif.pre_lesson_notify && (
-                <div className="flex items-center gap-2 pl-1">
-                  <span className="text-xs text-[#6B7280]">何分前</span>
-                  <select
-                    value={resolvedNotif.pre_lesson_minutes}
-                    onChange={e => setNotifForm({ ...resolvedNotif, pre_lesson_minutes: Number(e.target.value) })}
-                    className="border border-gray-200 rounded-lg px-2 py-1 text-sm outline-none focus:border-[#52B788]"
+            <div className="border-b border-gray-100">
+              <button
+                onClick={() => setExpandedNotif(expandedNotif === 'pre_lesson' ? null : 'pre_lesson')}
+                className="w-full flex items-center justify-between px-4 py-3.5"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-base">⏰</span>
+                  <div className="text-left">
+                    <p className="text-sm font-medium text-[#1B1B1B]">授業前通知</p>
+                    <p className="text-[11px] text-[#9CA3AF]">授業開始前に送信</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div
+                    onClick={e => { e.stopPropagation(); setNotifForm({ ...resolvedNotif, pre_lesson_notify: !resolvedNotif.pre_lesson_notify }) }}
+                    className={`w-10 h-5 rounded-full transition-colors flex items-center ${resolvedNotif.pre_lesson_notify ? 'bg-[#2D6A4F]' : 'bg-gray-200'}`}
                   >
-                    {[10, 15, 20, 30, 45, 60].map(m => (
-                      <option key={m} value={m}>{m}分前</option>
-                    ))}
-                  </select>
+                    <div className={`w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${resolvedNotif.pre_lesson_notify ? 'translate-x-5' : 'translate-x-0'}`} />
+                  </div>
+                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#9CA3AF" strokeWidth={2} className={`transition-transform ${expandedNotif === 'pre_lesson' ? 'rotate-180' : ''}`}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </button>
+              {expandedNotif === 'pre_lesson' && (
+                <div className="px-4 pb-4 space-y-3">
+                  {resolvedNotif.pre_lesson_notify && (
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-[#6B7280]">何分前</span>
+                      <select
+                        value={resolvedNotif.pre_lesson_minutes}
+                        onChange={e => setNotifForm({ ...resolvedNotif, pre_lesson_minutes: Number(e.target.value) })}
+                        className="border border-gray-200 rounded-lg px-2 py-1 text-sm outline-none focus:border-[#52B788]"
+                      >
+                        {[10, 15, 20, 30, 45, 60].map(m => (
+                          <option key={m} value={m}>{m}分前</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-xs text-[#6B7280] mb-2">差し込み変数（タップで挿入）</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {PRE_LESSON_VARS.map(v => (
+                        <button key={v.value} onClick={() => insertPreLesson(v.value)} className="text-xs px-2.5 py-1 rounded-full bg-[#D8F3DC] text-[#2D6A4F] font-medium hover:bg-[#b7e4c7] transition-colors">{v.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <textarea
+                    ref={preLessonRef}
+                    value={preLessonText ?? notifSetting?.pre_lesson_template ?? DEFAULT_PRE_LESSON_TEMPLATE}
+                    onChange={e => setPreLessonText(e.target.value)}
+                    rows={5}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#52B788] resize-none font-mono"
+                  />
+                  <button onClick={() => setPreLessonText(DEFAULT_PRE_LESSON_TEMPLATE)} className="text-xs text-[#6B7280] underline">デフォルトに戻す</button>
                 </div>
               )}
             </div>
 
-            <button
-              onClick={() => saveNotif()}
-              disabled={notifSaving}
-              className="w-full bg-[#2D6A4F] hover:bg-[#245c43] text-white text-sm font-bold py-2.5 rounded-xl transition-colors disabled:opacity-40"
-            >
-              {notifSaving ? '保存中...' : templateSaved ? '保存しました ✓' : '設定を保存'}
-            </button>
+            {/* 授業完了通知 */}
+            <div>
+              <button
+                onClick={() => setExpandedNotif(expandedNotif === 'lesson_done' ? null : 'lesson_done')}
+                className="w-full flex items-center justify-between px-4 py-3.5"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-base">📝</span>
+                  <div className="text-left">
+                    <p className="text-sm font-medium text-[#1B1B1B]">授業完了通知</p>
+                    <p className="text-[11px] text-[#9CA3AF]">授業を「完了」にしたとき自動送信</p>
+                  </div>
+                </div>
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#9CA3AF" strokeWidth={2} className={`transition-transform ${expandedNotif === 'lesson_done' ? 'rotate-180' : ''}`}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+              {expandedNotif === 'lesson_done' && (
+                <div className="px-4 pb-4 space-y-3">
+                  <div>
+                    <p className="text-xs text-[#6B7280] mb-2">差し込み変数（タップで挿入）</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {LESSON_DONE_VARS.map(v => (
+                        <button key={v.value} onClick={() => insertLessonDone(v.value)} className="text-xs px-2.5 py-1 rounded-full bg-[#D8F3DC] text-[#2D6A4F] font-medium hover:bg-[#b7e4c7] transition-colors">{v.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <textarea
+                    ref={lessonDoneRef}
+                    value={lessonDoneText ?? notifSetting?.lesson_done_template ?? DEFAULT_LESSON_DONE_TEMPLATE}
+                    onChange={e => setLessonDoneText(e.target.value)}
+                    rows={12}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#52B788] resize-none font-mono"
+                  />
+                  <button onClick={() => setLessonDoneText(DEFAULT_LESSON_DONE_TEMPLATE)} className="text-xs text-[#6B7280] underline">デフォルトに戻す</button>
+                </div>
+              )}
+            </div>
+
+            {/* 保存ボタン */}
+            <div className="px-4 pb-4 pt-2">
+              <button
+                onClick={() => saveNotif()}
+                disabled={notifSaving}
+                className="w-full bg-[#2D6A4F] hover:bg-[#245c43] text-white text-sm font-bold py-2.5 rounded-xl transition-colors disabled:opacity-40"
+              >
+                {notifSaving ? '保存中...' : templateSaved ? '保存しました ✓' : '設定を保存'}
+              </button>
+            </div>
           </div>
 
           {/* LINE連絡 */}
@@ -777,6 +919,19 @@ export default function RoomPage() {
               <p className="text-[10px] text-[#6B7280] mt-0.5">累計時間</p>
             </div>
           </div>
+
+          <button
+            onClick={() => navigate(`/room/${id}/records`)}
+            className="w-full bg-white rounded-2xl p-4 flex items-center justify-between text-left"
+          >
+            <div>
+              <p className="text-sm font-bold text-[#1B1B1B]">授業記録一覧</p>
+              <p className="text-xs text-[#6B7280]">これまでの授業履歴を確認</p>
+            </div>
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#9CA3AF" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
 
           {/* 次回の授業 */}
           {nextLesson && (() => {

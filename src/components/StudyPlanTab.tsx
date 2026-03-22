@@ -215,14 +215,16 @@ export default function StudyPlanTab({ room }: Props) {
   const toggleSubject = (subject: string) =>
     setExpandedSubjects(prev => {
       const next = new Set(prev)
-      next.has(subject) ? next.delete(subject) : next.add(subject)
+      if (next.has(subject)) next.delete(subject)
+      else next.add(subject)
       return next
     })
 
   const toggleTitle = (id: string) =>
     setExpandedTitles(prev => {
       const next = new Set(prev)
-      next.has(id) ? next.delete(id) : next.add(id)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
       return next
     })
 

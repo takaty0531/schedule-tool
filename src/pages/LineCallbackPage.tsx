@@ -4,18 +4,15 @@ import { supabase } from '../lib/supabase'
 
 export default function LineCallbackPage() {
   const navigate = useNavigate()
+  const params = new URLSearchParams(window.location.search)
+  const code = params.get('code')
   const [error, setError] = useState('')
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const code = params.get('code')
     localStorage.removeItem('line_oauth_state')
     localStorage.removeItem('line_oauth_state_ts')
 
-    if (!code) {
-      setError('認証コードが取得できませんでした')
-      return
-    }
+    if (!code) return
 
     const redirectUri = `${window.location.origin}/schedule-tool/line-callback`
 
@@ -45,7 +42,21 @@ export default function LineCallbackPage() {
           navigate('/dashboard')
         }
       })
-  }, [navigate])
+  }, [code, navigate])
+
+  if (!code) {
+    return (
+      <div className="min-h-svh flex flex-col items-center justify-center bg-[#F7F9F7] px-6 gap-4">
+        <p className="text-red-500 text-sm">認証コードが取得できませんでした</p>
+        <button
+          onClick={() => navigate('/')}
+          className="text-[#2D6A4F] font-medium text-sm"
+        >
+          ログイン画面に戻る
+        </button>
+      </div>
+    )
+  }
 
   if (error) {
     return (

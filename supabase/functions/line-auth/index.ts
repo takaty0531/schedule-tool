@@ -92,9 +92,8 @@ Deno.serve(async (req) => {
     })
     if (linkError) throw linkError
 
-    // セッショントークンを直接取得
-    const { data: sessionData, error: sessionError } =
-      await supabaseAdmin.auth.admin.getUserById(userId)
+    // ユーザーが取得できることを確認
+    const { error: sessionError } = await supabaseAdmin.auth.admin.getUserById(userId)
     if (sessionError) throw sessionError
 
     // OTPを使ってセッション作成

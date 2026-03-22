@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
@@ -108,7 +108,7 @@ export default function ScheduleTab({ room, members }: Props) {
   const [weekKey, setWeekKey] = useState(() => getWeekKey(getThisMonday()))
   const [confirmingSlot, setConfirmingSlot] = useState<{ dayIndex: number; slotStart: number; learnerIds: string[] } | null>(null)
   const [viewMode, setViewMode] = useState<ViewMode>('input')
-  const [localMySlots, setLocalMySlots] = useState<Set<string>>(new Set())
+  const [localMySlots, setLocalMySlots] = useState<Set<string> | null>(null)
 
   const isInstructor = user?.id === room.instructor_id
   const thisWeekKey = getWeekKey(getThisMonday())
@@ -133,23 +133,17 @@ export default function ScheduleTab({ room, members }: Props) {
     enabled: !!user,
   })
 
-  // サーバーデータでローカル状態を初期化
-  useEffect(() => {
-    setLocalMySlots(new Set(
-      slots.filter(s => s.person_id === user!.id).map(s => `${s.day_index}-${s.slot_start}`)
-    ))
-  }, [slots])
-
   const myServerSlots = useMemo(
     () => new Set(slots.filter(s => s.person_id === user!.id).map(s => `${s.day_index}-${s.slot_start}`)),
     [slots, user]
   )
+  const effectiveLocalMySlots = localMySlots ?? myServerSlots
 
   const isDirty = useMemo(() => {
-    if (localMySlots.size !== myServerSlots.size) return true
-    for (const key of localMySlots) if (!myServerSlots.has(key)) return true
+    if (effectiveLocalMySlots.size !== myServerSlots.size) return true
+    for (const key of effectiveLocalMySlots) if (!myServerSlots.has(key)) return true
     return false
-  }, [localMySlots, myServerSlots])
+  }, [effectiveLocalMySlots, myServerSlots])
 
   // 確定済み授業（全期間）
   const { data: allLessons = [] } = useQuery({
@@ -175,7 +169,7 @@ export default function ScheduleTab({ room, members }: Props) {
     if (viewMode === 'view') return
     const key = `${dayIndex}-${slotStart}`
     setLocalMySlots(prev => {
-      const next = new Set(prev)
+      const next = new Set(prev ?? myServerSlots)
       if (viewMode === 'erase') next.delete(key)
       else if (next.has(key)) next.delete(key)
       else next.add(key)
@@ -188,9 +182,9 @@ export default function ScheduleTab({ room, members }: Props) {
     mutationFn: async () => {
       const mySlots = slots.filter(s => s.person_id === user!.id)
       const toDelete = mySlots
-        .filter(s => !localMySlots.has(`${s.day_index}-${s.slot_start}`))
+        .filter(s => !effectiveLocalMySlots.has(`${s.day_index}-${s.slot_start}`))
         .map(s => s.id)
-      const toAdd = [...localMySlots]
+      const toAdd = [...effectiveLocalMySlots]
         .filter(key => !myServerSlots.has(key))
         .map(key => {
           const [dayIndex, slotStart] = key.split('-').map(Number)
@@ -258,7 +252,7 @@ export default function ScheduleTab({ room, members }: Props) {
   // Map<cellKey, overlappingLearnerIds[]>
   const overlapStartMap = useMemo(() => {
     const map = new Map<string, string[]>()
-    if (learnerIds.length === 0) return map
+    if (learnerIds.length === 0 || !user) return map
     for (let colIndex = 0; colIndex < 7; colIndex++) {
       const dayIndex = COL_TO_DAY_INDEX[colIndex]
       for (let i = 0; i <= TIME_SLOTS.length - slotsPerLesson; i++) {
@@ -269,8 +263,8 @@ export default function ScheduleTab({ room, members }: Props) {
             const slotStart = startSlot + j * 30
             const key = `${dayIndex}-${slotStart}`
             const persons = new Set(slotsMap.get(key) ?? [])
-            if (localMySlots.has(key)) persons.add(user!.id)
-            else persons.delete(user!.id)
+            if (effectiveLocalMySlots.has(key)) persons.add(user.id)
+            else persons.delete(user.id)
             if (!persons.has(room.instructor_id) || !persons.has(learnerId)) {
               allMatch = false; break
             }
@@ -284,7 +278,7 @@ export default function ScheduleTab({ room, members }: Props) {
       }
     }
     return map
-  }, [slotsMap, localMySlots, room.instructor_id, learnerIds, slotsPerLesson])
+  }, [slotsMap, effectiveLocalMySlots, room.instructor_id, learnerIds, slotsPerLesson, user])
 
   // セルの背景色
   function getCellBg(dayIndex: number, slotStart: number): string {
@@ -292,7 +286,7 @@ export default function ScheduleTab({ room, members }: Props) {
     const key = `${dayIndex}-${slotStart}`
     const serverPersons = slotsMap.get(key) ?? new Set<string>()
     const effectivePersons = new Set([...serverPersons])
-    if (localMySlots.has(key)) effectivePersons.add(user!.id)
+    if (effectiveLocalMySlots.has(key)) effectivePersons.add(user!.id)
     else effectivePersons.delete(user!.id)
     const hasInstructor = effectivePersons.has(room.instructor_id)
     const presentLearners = learnerIds.filter(id => effectivePersons.has(id))
@@ -310,7 +304,7 @@ export default function ScheduleTab({ room, members }: Props) {
     } else {
       const myCI = (learnerColorIndex.get(user!.id) ?? 0) % LEARNER_COLORS.length
       const myColor = LEARNER_COLORS[myCI]
-      const isMySlot = localMySlots.has(key)
+      const isMySlot = effectiveLocalMySlots.has(key)
       if (isMySlot && hasInstructor) return myColor.active
       if (isMySlot) return myColor.bg
       if (effectivePersons.size > 0) return '#E5E7EB'

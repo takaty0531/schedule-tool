@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import type { Invitation, Room } from '../types/database'
 
+type InvitationWithRoom = Invitation & { rooms: Room }
+
 export default function InvitePage() {
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
@@ -24,8 +26,9 @@ export default function InvitePage() {
       if (data.status === 'accepted') { setStatus('invalid'); return }
       if (new Date(data.expires_at) < new Date()) { setStatus('invalid'); return }
 
-      setInvitation(data as Invitation)
-      setRoom((data as any).rooms as Room)
+      const row = data as InvitationWithRoom
+      setInvitation(row)
+      setRoom(row.rooms)
       setStatus('valid')
     }
     fetchInvitation()

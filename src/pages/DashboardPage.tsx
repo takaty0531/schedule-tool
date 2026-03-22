@@ -7,6 +7,19 @@ import BottomNav from '../components/BottomNav'
 import Avatar from '../components/Avatar'
 import type { Room } from '../types/database'
 
+type MemberRoomRow = {
+  room_id: string
+  rooms: Room | Room[] | null
+}
+
+type TodayLessonRow = {
+  id: string
+  room_id: string
+  scheduled_at: string
+  duration_minutes: number
+  rooms: { name: string } | { name: string }[] | null
+}
+
 // ルーム作成モーダル
 function CreateRoomModal({ onClose }: { onClose: () => void }) {
   const { user } = useAuth()
@@ -118,12 +131,16 @@ export default function DashboardPage() {
         .select('room_id, rooms(*)')
         .order('joined_at', { ascending: false })
       if (error) throw error
-      return data.map((d: any) => d.rooms) as Room[]
+      return (data as MemberRoomRow[])
+        .map((d) => (Array.isArray(d.rooms) ? d.rooms[0] : d.rooms))
+        .filter((room): room is Room => !!room)
     },
     enabled: profile?.role === 'learner' || profile?.role === 'guardian',
   })
 
   const rooms = profile?.role === 'instructor' ? instructorRooms : memberRooms
+  const getRoomName = (value: TodayLessonRow['rooms']) =>
+    Array.isArray(value) ? value[0]?.name ?? 'ルーム' : value?.name ?? 'ルーム'
 
   // 各ルームの次回授業
   const { data: nextLessonsMap = {} } = useQuery({
@@ -214,7 +231,7 @@ export default function DashboardPage() {
         {todayLessons.length > 0 && (
           <div className="bg-[#2D6A4F] rounded-2xl p-4 text-white space-y-2">
             <p className="text-xs opacity-70 font-medium">📅 今日の授業</p>
-            {todayLessons.map((l: any) => {
+            {todayLessons.map((l: TodayLessonRow) => {
               const d = new Date(l.scheduled_at)
               const h = d.getHours(), m = String(d.getMinutes()).padStart(2, '0')
               const endMin = d.getHours() * 60 + d.getMinutes() + l.duration_minutes
@@ -225,7 +242,7 @@ export default function DashboardPage() {
                   onClick={() => navigate(`/room/${l.room_id}`)}
                   className="w-full flex items-center justify-between"
                 >
-                  <span className="font-bold text-sm">{(l.rooms as any)?.name}</span>
+                  <span className="font-bold text-sm">{getRoomName(l.rooms)}</span>
                   <span className="text-xs opacity-80">{h}:{m} 〜 {eh}:{em}</span>
                 </button>
               )

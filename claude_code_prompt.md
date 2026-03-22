@@ -225,34 +225,81 @@ UNIQUE (user_id, room_id)
 
 ---
 
+## 実装済み機能（2026-03-21時点）
+
+### 認証
+- LINEログイン（OAuth 2.0 authorization code grant）
+  - iOSのSFSafariViewController問題によりstate検証は廃止（localStorageが共有されないため）
+  - Edge Function `line-auth` でLINEトークン交換 → Supabase Auth セッション発行
+  - 既存ユーザーのline_user_id自動紐付け対応
+- メールログイン（Supabase Auth）
+- 設定画面でのLINE連携状態表示（`line_u...@...`形式のメールは「LINEアカウント」と表示）
+
+### セットアップフロー
+- `/setup/role` → `/setup/profile` → `/dashboard` の順
+- 役割設定済みの場合は `/setup/role` をスキップ
+- 名前設定済みの場合は `/setup/profile` をスキップ（上書き防止）
+- LINEユーザーはprofileが既存のため INSERT ではなく UPDATE で役割保存
+
+### ルーム・招待
+- 先生によるルーム作成（名前・授業時間）
+- 生徒・保護者への招待リンク発行
+- 招待受け入れページ（`/invite/:token`）
+  - 未ログインの場合はログイン/新規登録へ誘導（token付きredirect）
+  - authLoading待機後にsession判定（ログイン状態の誤判定を防止）
+
+### ダッシュボード
+- 先生: 自分が作ったルーム一覧、ルーム作成・削除
+- 生徒・保護者: 参加しているルーム一覧
+- 今日の授業バナー表示
+- 各ルームの次回授業日・宿題件数表示
+
+### iOS対応
+- `font-size: 16px !important` でinput自動ズーム防止（`src/index.css`）
+
+### UIルール
+- アプリ内に絵文字は使用しない
+- メールラベルは「メール」（「メールアドレス」ではない）
+- 長いメールアドレスはtruncateで省略
+
+### DBマイグレーション（適用済み）
+- `profiles.role` を NOT NULL → nullable に変更（LINEユーザーのロール設定前対応）
+- `room_members` に INSERT RLSポリシー追加（`learner_id = auth.uid()`）
+
+### Edge Functions（Supabase）
+- `line-auth`: LINEトークン交換・ユーザー作成/セッション発行
+- `line-notify`: LINE Messaging API通知送信
+
+---
+
 ## 開発フェーズ
 
-### フェーズ1（環境構築）
-1. Vite + React プロジェクト作成
-2. Tailwind CSS・React Router・TanStack Query セットアップ
-3. GitHub Pages デプロイ設定（`vite.config.ts`のbase設定）
-4. Supabase クライアント設定
+### フェーズ1（完了）環境構築
+- Vite + React、Tailwind CSS、React Router、TanStack Query
+- GitHub Pages デプロイ設定
+- Supabase クライアント設定
 
-### フェーズ2（認証・プロフィール）
-5. LINEログイン認証
-6. プロフィール作成・アバターアップロード
+### フェーズ2（完了）認証・プロフィール
+- LINEログイン認証（iOS Safari対応済み）
+- プロフィール作成・アバターアップロード
 
-### フェーズ3（ルーム・招待）
-7. ルーム作成
-8. 招待機能（受講者・保護者）
-9. 招待受け入れページ
+### フェーズ3（完了）ルーム・招待
+- ルーム作成
+- 招待機能（受講者・保護者）
+- 招待受け入れページ
 
-### フェーズ4（スケジュール調整）
-10. スケジュール調整画面（既存機能の移植・改善）
-11. 30分単位スロット・授業時間対応
+### フェーズ4（完了）スケジュール調整
+- スケジュール調整画面
+- 30分単位スロット・授業時間対応
 
-### フェーズ5（授業記録・ファイル）
-12. 授業記録・宿題入力
-13. ファイルアップロード・閲覧
+### フェーズ5（完了）授業記録・宿題
+- 授業記録・宿題入力
+- 先生専用「通知」タブ・授業完了LINE通知テンプレート
 
-### フェーズ6（通知）
-14. LINE Messaging API設定
-15. Edge Functions + pg_cronで通知スケジュール実装
+### フェーズ6（実装中）通知
+- LINE Messaging API設定済み
+- Edge Functions + pg_cronで通知スケジュール実装済み
+- 先生によるLINE連絡送信機能（宛先選択）
 
 ---
 
@@ -264,3 +311,4 @@ UNIQUE (user_id, room_id)
 - Supabase RLSポリシーを各テーブルに適切に設定する
 - DB・コード内のロール名は汎用名称（instructor/learner/guardian）を使用
 - UI表示は初期リリース時は家庭教師向け文言（先生・生徒・保護者）で実装
+- アプリ内に絵文字は使用しない
