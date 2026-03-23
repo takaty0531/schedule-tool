@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { supabase } from '../../lib/supabase'
 import type { Role } from '../../types/database'
@@ -12,6 +12,8 @@ const roles: { value: Role; label: string; description: string }[] = [
 
 export default function RoleSelectPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const redirect = searchParams.get('redirect')
   const { user, profile } = useAuth()
   const [selected, setSelected] = useState<Role | null>(null)
   const [loading, setLoading] = useState(false)
@@ -19,7 +21,7 @@ export default function RoleSelectPage() {
 
   // 役割が設定済みならスキップ
   useEffect(() => {
-    if (profile?.role) navigate('/setup/profile', { replace: true })
+    if (profile?.role) navigate(redirect ? `/setup/profile?redirect=${encodeURIComponent(redirect)}` : '/setup/profile', { replace: true })
   }, [profile, navigate])
 
   const handleNext = async () => {
@@ -38,7 +40,7 @@ export default function RoleSelectPage() {
       setError('保存に失敗しました。もう一度お試しください。')
       return
     }
-    navigate('/setup/profile')
+    navigate(redirect ? `/setup/profile?redirect=${encodeURIComponent(redirect)}` : '/setup/profile')
   }
 
   return (

@@ -111,8 +111,23 @@ function InviteModal({ room, members, onClose }: { room: Room; members: (RoomMem
     },
   })
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(inviteUrl)
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(inviteUrl)
+    } catch {
+      // clipboard APIが使えない場合のフォールバック
+      const textarea = document.createElement('textarea')
+      textarea.value = inviteUrl
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand('copy')
+      document.body.removeChild(textarea)
+    }
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   return (
@@ -187,7 +202,7 @@ function InviteModal({ room, members, onClose }: { room: Room; members: (RoomMem
               onClick={handleCopy}
               className="w-full bg-[#2D6A4F] hover:bg-[#245c43] text-white font-bold py-3 rounded-2xl transition-colors"
             >
-              リンクをコピー
+              {copied ? 'コピーしました!' : 'リンクをコピー'}
             </button>
             <button
               onClick={() => setInviteUrl('')}

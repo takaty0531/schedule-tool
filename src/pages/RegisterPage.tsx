@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { startLineLogin } from '../lib/pwa'
 
 export default function RegisterPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const redirect = searchParams.get('redirect')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -39,7 +41,7 @@ export default function RegisterPage() {
     setLoading(false)
     // セッションがある場合はメール確認不要 → そのままセットアップへ
     if (data.session) {
-      navigate('/setup/role')
+      navigate(redirect ? `/setup/role?redirect=${encodeURIComponent(redirect)}` : '/setup/role')
       return
     }
     // セッションがない場合はメール確認が必要

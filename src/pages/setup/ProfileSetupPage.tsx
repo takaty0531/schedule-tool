@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../lib/auth'
 import { supabase } from '../../lib/supabase'
 
 export default function ProfileSetupPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const redirect = searchParams.get('redirect')
   const { user, profile, refreshProfile } = useAuth()
   const [displayName, setDisplayName] = useState('')
 
   // 名前が登録済みならスキップ
   useEffect(() => {
-    if (profile?.display_name) navigate('/dashboard', { replace: true })
+    if (profile?.display_name) navigate(redirect || '/dashboard', { replace: true })
   }, [profile, navigate])
   const [avatarFile, setAvatarFile] = useState<File | null>(null)
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null)
@@ -60,7 +62,7 @@ export default function ProfileSetupPage() {
 
     await refreshProfile()
     setLoading(false)
-    navigate('/dashboard')
+    navigate(redirect || '/dashboard')
   }
 
   return (

@@ -41,13 +41,15 @@ export default function InvitePage() {
     setStatus('joining')
 
     // room_membersに登録（生徒・保護者共通）
-    if (invitation.role === 'learner') {
-      const { error } = await supabase.from('room_members').insert({
-        room_id: invitation.room_id,
-        learner_id: session.user.id,
-        display_name: invitation.display_name,
-      })
-      if (error && error.code !== '23505') { setStatus('valid'); return }
+    const { error: memberError } = await supabase.from('room_members').insert({
+      room_id: invitation.room_id,
+      learner_id: session.user.id,
+      display_name: invitation.display_name,
+    })
+    if (memberError && memberError.code !== '23505') {
+      console.error('room_members insert error:', memberError)
+      setStatus('valid')
+      return
     }
 
     // 保護者の場合はguardian_learnerにも登録
@@ -56,7 +58,11 @@ export default function InvitePage() {
         guardian_id: session.user.id,
         learner_id: invitation.learner_id,
       })
-      if (error && error.code !== '23505') { setStatus('valid'); return }
+      if (error && error.code !== '23505') {
+        console.error('guardian_learner insert error:', error)
+        setStatus('valid')
+        return
+      }
     }
 
     // 招待をacceptedに更新
