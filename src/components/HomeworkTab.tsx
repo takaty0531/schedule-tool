@@ -629,7 +629,7 @@ export default function HomeworkTab({ room, members }: Props) {
     queryKey: ['lessons_all', room.id],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('lessons').select('*').eq('room_id', room.id).neq('status', 'cancelled').order('scheduled_at')
+        .from('lessons').select('*').eq('room_id', room.id).neq('status', 'cancelled').order('scheduled_at').limit(500)
       if (error) throw error
       return data as Lesson[]
     },

@@ -36,6 +36,8 @@ export default function InvitePage() {
 
   const handleJoin = async () => {
     if (!invitation || !session) return
+    // 期限切れの再チェック
+    if (new Date(invitation.expires_at) < new Date()) { setStatus('invalid'); return }
     setStatus('joining')
 
     // room_membersに登録（生徒・保護者共通）

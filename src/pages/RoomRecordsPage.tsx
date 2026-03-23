@@ -41,6 +41,7 @@ export default function RoomRecordsPage() {
         .select('*')
         .eq('room_id', id!)
         .order('scheduled_at', { ascending: false })
+        .limit(500)
       if (error) throw error
       return data as Lesson[]
     },

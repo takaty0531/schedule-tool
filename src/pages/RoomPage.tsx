@@ -9,7 +9,7 @@ import ScheduleTab from '../components/ScheduleTab'
 import StudyPlanTab from '../components/StudyPlanTab'
 import HomeworkTab from '../components/HomeworkTab'
 import type { Room, RoomMember, Profile, Invitation, Lesson } from '../types/database'
-import { minutesToTime } from '../lib/scheduleUtils'
+import { minutesToTime, scheduledAtToSlot, getWeekKey } from '../lib/scheduleUtils'
 
 type Tab = 'detail' | 'schedule' | 'study_plan' | 'homework' | 'notify'
 
@@ -197,6 +197,7 @@ export default function RoomPage() {
   const queryClient = useQueryClient()
   const [showInvite, setShowInvite] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: 'member' | 'invitation'; id: string; name: string } | null>(null)
+  const [cancelLessonConfirm, setCancelLessonConfirm] = useState<{ lesson: Lesson; label: string } | null>(null)
   const initialTab = (searchParams.get('tab') as Tab | null) ?? 'detail'
   const [activeTab, setActiveTab] = useState<Tab>(
     initialTab === 'notify' || initialTab === 'schedule' || initialTab === 'study_plan' || initialTab === 'homework'
@@ -438,6 +439,41 @@ export default function RoomPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['members', id] })
       setDeleteConfirm(null)
+    },
+  })
+
+  const cancelLessonMutation = useMutation({
+    mutationFn: async (lesson: Lesson) => {
+      // 授業に対応するスロットを特定して削除
+      const { dayIndex, slotStart } = scheduledAtToSlot(lesson.scheduled_at)
+      const slotsPerLesson = room!.lesson_minutes / 30
+      const d = new Date(lesson.scheduled_at)
+      const monday = new Date(d)
+      const day = monday.getDay()
+      monday.setDate(monday.getDate() - (day === 0 ? 6 : day - 1))
+      monday.setHours(0, 0, 0, 0)
+      const weekKey = getWeekKey(monday)
+
+      // 該当する30分スロットをすべて削除（全参加者分）
+      const slotStarts = Array.from({ length: slotsPerLesson }, (_, i) => slotStart + i * 30)
+      const { error: slotError } = await supabase
+        .from('slots')
+        .delete()
+        .eq('room_id', lesson.room_id)
+        .eq('week_key', weekKey)
+        .eq('day_index', dayIndex)
+        .in('slot_start', slotStarts)
+      if (slotError) throw slotError
+
+      // 授業を削除
+      const { error } = await supabase.from('lessons').delete().eq('id', lesson.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['lessons_scheduled', id] })
+      queryClient.invalidateQueries({ queryKey: ['next_lessons_dashboard'] })
+      queryClient.invalidateQueries({ queryKey: ['slots', id] })
+      queryClient.invalidateQueries({ queryKey: ['lessons', id, 'all'] })
     },
   })
 
@@ -994,14 +1030,14 @@ export default function RoomPage() {
                   const learnerMember = l.learner_id ? members.find(m => m.learner_id === l.learner_id) : null
                   const ci = l.learner_id ? learnerIdList.indexOf(l.learner_id) % COLORS.length : 0
                   const dotColor = learnerMember ? COLORS[ci < 0 ? 0 : ci] : '#2D6A4F'
+                  const label = `${d.getMonth() + 1}月${d.getDate()}日(${days[d.getDay()]}) ${minutesToTime(d.getHours() * 60 + d.getMinutes())} 〜 ${minutesToTime(endMin)}`
                   return (
-                    <button
-                      key={l.id}
-                      onClick={() => navigate(`/room/${id}/lesson/${l.id}`)}
-                      className="w-full bg-white rounded-2xl p-4 flex items-center gap-3 text-left active:opacity-70 transition-opacity"
-                    >
+                    <div key={l.id} className="bg-white rounded-2xl p-4 flex items-center gap-3">
                       <div className="w-2 h-2 rounded-full shrink-0" style={{ background: dotColor }} />
-                      <div className="flex-1">
+                      <button
+                        onClick={() => navigate(`/room/${id}/lesson/${l.id}`)}
+                        className="flex-1 text-left active:opacity-70 transition-opacity"
+                      >
                         <p className="text-sm font-medium text-[#1B1B1B]">
                           {d.getMonth() + 1}月{d.getDate()}日({days[d.getDay()]})
                         </p>
@@ -1011,11 +1047,22 @@ export default function RoomPage() {
                         {learnerMember && (
                           <p className="text-xs font-medium mt-0.5" style={{ color: dotColor }}>{learnerMember.display_name}</p>
                         )}
-                      </div>
+                      </button>
+                      {profile?.role === 'instructor' && (
+                        <button
+                          onClick={() => setCancelLessonConfirm({ lesson: l, label })}
+                          className="shrink-0 p-1.5 rounded-lg text-[#EF4444] hover:bg-red-50 active:opacity-70 transition"
+                          title="授業をキャンセル"
+                        >
+                          <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      )}
                       <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#D1D5DB" strokeWidth={2}>
                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
                       </svg>
-                    </button>
+                    </div>
                   )
                 })}
               </div>
@@ -1139,6 +1186,38 @@ export default function RoomPage() {
                 className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors disabled:opacity-50"
               >
                 削除する
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 授業キャンセル確認ダイアログ */}
+      {cancelLessonConfirm && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center px-4" onClick={() => setCancelLessonConfirm(null)}>
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm space-y-4" onClick={e => e.stopPropagation()}>
+            <h2 className="text-base font-bold text-[#1B1B1B]">授業をキャンセル</h2>
+            <p className="text-sm text-[#6B7280]">
+              以下の授業をキャンセルしますか？<br />
+              <span className="font-medium text-[#1B1B1B]">{cancelLessonConfirm.label}</span>
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setCancelLessonConfirm(null)}
+                className="flex-1 py-2.5 rounded-xl border border-gray-200 text-sm font-medium text-[#6B7280]"
+              >
+                戻る
+              </button>
+              <button
+                onClick={() => {
+                  cancelLessonMutation.mutate(cancelLessonConfirm.lesson, {
+                    onSuccess: () => setCancelLessonConfirm(null),
+                  })
+                }}
+                disabled={cancelLessonMutation.isPending}
+                className="flex-1 py-2.5 rounded-xl bg-red-500 hover:bg-red-600 text-white text-sm font-bold transition-colors disabled:opacity-50"
+              >
+                キャンセルする
               </button>
             </div>
           </div>
