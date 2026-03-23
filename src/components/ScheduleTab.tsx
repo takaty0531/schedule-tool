@@ -192,6 +192,7 @@ export default function ScheduleTab({ room, members }: Props) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['slots', room.id, weekKey] })
       queryClient.invalidateQueries({ queryKey: ['lessons', room.id, 'all'] })
+      queryClient.invalidateQueries({ queryKey: ['lessons_scheduled', room.id] })
       setLocalMySlots(null)
     },
   })
@@ -297,18 +298,25 @@ export default function ScheduleTab({ room, members }: Props) {
     const presentLearners = learnerIds.filter(id => effectivePersons.has(id))
 
     if (isInstructor) {
-      if (hasInstructor) return '#D8F3DC'
+      // 自分（講師）の空き: 緑
+      if (hasInstructor) return '#52B788'
+      // 生徒だけが入れている: 生徒カラー（濃いめ）
       if (presentLearners.length > 0) {
         const ci = (learnerColorIndex.get(presentLearners[0]) ?? 0) % LEARNER_COLORS.length
-        return LEARNER_COLORS[ci].bg
+        return LEARNER_COLORS[ci].active
       }
     } else {
       const myCI = (learnerColorIndex.get(user!.id) ?? 0) % LEARNER_COLORS.length
       const myColor = LEARNER_COLORS[myCI]
       const isMySlot = effectiveLocalMySlots.has(key)
+      // 自分+講師: 仮決定色（active）
       if (isMySlot && hasInstructor) return myColor.active
+      // 自分だけ: 濃いめのbg
       if (isMySlot) return myColor.bg
-      if (effectivePersons.size > 0) return '#E5E7EB'
+      // 講師だけが入れている: 緑
+      if (hasInstructor) return '#52B788'
+      // 他の生徒だけ: 薄いグレー
+      if (effectivePersons.size > 0) return '#D1D5DB'
     }
     return '#F3F4F6'
   }
@@ -419,7 +427,7 @@ export default function ScheduleTab({ room, members }: Props) {
         )}
         {/* 状態凡例 */}
         <div className="flex gap-3 justify-center text-[10px] text-[#6B7280]">
-          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-[#D8F3DC] inline-block" />自分の空き</span>
+          <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-[#52B788] inline-block" />自分の空き</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm inline-block" style={{ background: LEARNER_COLORS[0].active }} />仮決定</span>
           <span className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-[#2D6A4F] inline-block" />授業確定</span>
         </div>
