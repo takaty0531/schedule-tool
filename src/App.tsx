@@ -16,7 +16,6 @@ import RoleSelectPage from './pages/setup/RoleSelectPage'
 import ProfileSetupPage from './pages/setup/ProfileSetupPage'
 import TermsPage from './pages/TermsPage'
 import PrivacyPage from './pages/PrivacyPage'
-import InstallBanner from './components/InstallBanner'
 
 const queryClient = new QueryClient()
 
@@ -73,7 +72,6 @@ export default function App() {
       <AuthProvider>
         <BrowserRouter basename="/schedule-tool">
           <AppRoutes />
-          <InstallBanner />
         </BrowserRouter>
       </AuthProvider>
     </QueryClientProvider>
