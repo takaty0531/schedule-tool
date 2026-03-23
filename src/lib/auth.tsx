@@ -38,21 +38,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        // サーバーに問い合わせてユーザーが実際に存在するか確認
-        const { error } = await supabase.auth.getUser()
-        if (error) {
-          // ユーザーが削除済みなどでトークンが無効 → 強制サインアウト
-          await supabase.auth.signOut()
-          setLoading(false)
-          return
+    const init = async () => {
+      try {
+        // ローカルに保存されたセッションを取得
+        const { data: { session } } = await supabase.auth.getSession()
+
+        if (session?.user) {
+          // トークンが期限切れの場合はリフレッシュを試みる
+          const { data: { user }, error } = await supabase.auth.getUser()
+          if (error) {
+            // リフレッシュトークンでセッション復元を試行
+            const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession()
+            if (refreshError || !refreshed.session) {
+              await supabase.auth.signOut()
+              setLoading(false)
+              return
+            }
+            setSession(refreshed.session)
+            await fetchProfile(refreshed.session.user.id)
+            setLoading(false)
+            return
+          }
+          setSession(session)
+          await fetchProfile(user!.id)
+        }
+      } catch {
+        // ネットワークエラー等 → ローカルセッションをそのまま使用
+        const { data: { session } } = await supabase.auth.getSession()
+        if (session?.user) {
+          setSession(session)
+          await fetchProfile(session.user.id)
         }
       }
-      setSession(session)
-      if (session?.user) fetchProfile(session.user.id).finally(() => setLoading(false))
-      else setLoading(false)
-    })
+      setLoading(false)
+    }
+    init()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
