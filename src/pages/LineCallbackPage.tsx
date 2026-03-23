@@ -6,6 +6,8 @@ export default function LineCallbackPage() {
   const navigate = useNavigate()
   const params = new URLSearchParams(window.location.search)
   const code = params.get('code')
+  const state = params.get('state')
+  const isLinkMode = state === 'link'
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -16,6 +18,26 @@ export default function LineCallbackPage() {
 
     const redirectUri = `${window.location.origin}/schedule-tool/line-callback`
 
+    if (isLinkMode) {
+      // LINE連携モード: 既存アカウントにLINEを紐づける
+      supabase.auth.getSession().then(async ({ data: { session } }) => {
+        if (!session) {
+          setError('ログインセッションが見つかりません')
+          return
+        }
+        const { data, error: fnError } = await supabase.functions.invoke('line-link', {
+          body: { code, redirect_uri: redirectUri },
+        })
+        if (fnError || data?.error) {
+          setError(data?.error ?? 'LINE連携に失敗しました')
+          return
+        }
+        navigate('/settings?line_linked=1')
+      })
+      return
+    }
+
+    // 通常のLINEログイン/登録モード
     supabase.functions
       .invoke('line-auth', { body: { code, redirect_uri: redirectUri } })
       .then(async ({ data, error: fnError }) => {
@@ -24,7 +46,6 @@ export default function LineCallbackPage() {
           return
         }
 
-        // セッションをセット
         const { error: sessionError } = await supabase.auth.setSession({
           access_token: data.access_token,
           refresh_token: data.refresh_token,
@@ -35,14 +56,13 @@ export default function LineCallbackPage() {
           return
         }
 
-        // 新規ユーザーはロール設定へ、既存はダッシュボードへ
         if (data.is_new_user) {
           navigate('/setup/role')
         } else {
           navigate('/dashboard')
         }
       })
-  }, [code, navigate])
+  }, [code, navigate, isLinkMode])
 
   if (!code) {
     return (

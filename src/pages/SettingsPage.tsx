@@ -187,7 +187,23 @@ export default function SettingsPage() {
                   連携済み
                 </span>
               ) : (
-                <span className="text-xs text-[#9CA3AF]">未連携</span>
+                <button
+                  onClick={() => {
+                    const redirectUri = `${window.location.origin}/schedule-tool/line-callback`
+                    const params = new URLSearchParams({
+                      response_type: 'code',
+                      client_id: import.meta.env.VITE_LINE_CHANNEL_ID,
+                      redirect_uri: redirectUri,
+                      state: 'link',
+                      scope: 'profile openid',
+                    })
+                    window.location.href = `https://access.line.me/oauth2/v2.1/authorize?${params}`
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs bg-[#06C755] text-white font-medium px-3 py-1.5 rounded-lg hover:bg-[#05b34c] transition-colors"
+                >
+                  <svg width="14" height="14" viewBox="0 0 48 48" fill="white"><path d="M24 4C12.95 4 4 11.86 4 21.5c0 6.37 4.1 11.96 10.3 15.18-.45 1.68-1.63 6.1-1.87 7.05-.3 1.17.43 1.16 1.01.84.47-.27 7.43-4.91 10.44-6.9.69.1 1.4.15 2.12.15 11.05 0 20-7.86 20-17.5S35.05 4 24 4z"/></svg>
+                  連携する
+                </button>
               )}
             </div>
           </div>
