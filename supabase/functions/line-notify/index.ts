@@ -6,7 +6,11 @@ const corsHeaders = {
 }
 
 async function sendLineMessage(lineUserId: string, message: string) {
-  const token = Deno.env.get('LINE_MESSAGING_ACCESS_TOKEN')!
+  const token = Deno.env.get('LINE_MESSAGING_ACCESS_TOKEN')
+  if (!token) {
+    console.error('[LINE-NOTIFY] LINE_MESSAGING_ACCESS_TOKEN が未設定')
+    return false
+  }
   const res = await fetch('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: {
@@ -18,6 +22,10 @@ async function sendLineMessage(lineUserId: string, message: string) {
       messages: [{ type: 'text', text: message }],
     }),
   })
+  if (!res.ok) {
+    const body = await res.text()
+    console.error(`[LINE-NOTIFY] Push失敗: status=${res.status} to=${lineUserId} body=${body}`)
+  }
   return res.ok
 }
 

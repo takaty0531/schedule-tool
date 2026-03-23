@@ -5,8 +5,12 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-async function sendLineMessage(lineUserId: string, message: string) {
-  const token = Deno.env.get('LINE_MESSAGING_ACCESS_TOKEN')!
+async function sendLineMessage(lineUserId: string, message: string): Promise<{ ok: boolean; status: number; error?: string }> {
+  const token = Deno.env.get('LINE_MESSAGING_ACCESS_TOKEN')
+  if (!token) {
+    console.error('[LINE] LINE_MESSAGING_ACCESS_TOKEN が未設定')
+    return { ok: false, status: 0, error: 'LINE_MESSAGING_ACCESS_TOKEN not set' }
+  }
   const res = await fetch('https://api.line.me/v2/bot/message/push', {
     method: 'POST',
     headers: {
@@ -18,7 +22,13 @@ async function sendLineMessage(lineUserId: string, message: string) {
       messages: [{ type: 'text', text: message }],
     }),
   })
-  return res.ok
+  if (!res.ok) {
+    const body = await res.text()
+    console.error(`[LINE] Push失敗: status=${res.status} to=${lineUserId} body=${body}`)
+    return { ok: false, status: res.status, error: body }
+  }
+  console.log(`[LINE] Push成功: to=${lineUserId}`)
+  return { ok: true, status: res.status }
 }
 
 Deno.serve(async (req) => {
@@ -104,13 +114,23 @@ Deno.serve(async (req) => {
 
   const lineMessage = `📩 ${room.name}より\n\n${message.trim()}`
   let sentCount = 0
+  const errors: string[] = []
+
+  console.log(`[LINE] 送信開始: room=${room.name} recipients=${recipients.length}`)
 
   for (const r of recipients) {
     if (r.line_user_id) {
-      const ok = await sendLineMessage(r.line_user_id, lineMessage)
-      if (ok) sentCount++
+      const result = await sendLineMessage(r.line_user_id, lineMessage)
+      if (result.ok) {
+        sentCount++
+      } else {
+        errors.push(`${r.line_user_id}: ${result.status} ${result.error}`)
+      }
     }
   }
+
+  console.log(`[LINE] 送信完了: sent=${sentCount} errors=${errors.length}`)
+  if (errors.length > 0) console.error(`[LINE] エラー詳細:`, errors)
 
   // 送信後にline_logsに記録
   await supabase.from('line_logs').insert({
@@ -121,7 +141,7 @@ Deno.serve(async (req) => {
     sent_count: sentCount,
   })
 
-  return new Response(JSON.stringify({ sent: sentCount }), {
+  return new Response(JSON.stringify({ sent: sentCount, errors: errors.length > 0 ? errors : undefined }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
 })

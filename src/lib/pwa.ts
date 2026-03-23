@@ -29,6 +29,7 @@ export function startLineLogin(mode: 'login' | 'link' = 'login') {
     redirect_uri: redirectUri,
     state,
     scope: 'profile openid',
+    bot_prompt: 'aggressive',
   })
   window.location.href = `https://access.line.me/oauth2/v2.1/authorize?${params}`
 }
