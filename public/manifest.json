@@ -1,0 +1,21 @@
+{
+  "name": "ForClass",
+  "short_name": "ForClass",
+  "description": "先生と生徒をつなぐ授業管理アプリ",
+  "start_url": "/schedule-tool/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#2D6A4F",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
