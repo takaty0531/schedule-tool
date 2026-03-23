@@ -29,6 +29,7 @@ export default function ScheduleTab({ room, members }: Props) {
   const queryClient = useQueryClient()
   const [weekKey, setWeekKey] = useState(() => getWeekKey(getThisMonday()))
   const [localMySlots, setLocalMySlots] = useState<Set<string> | null>(null)
+  const [showNotifyDialog, setShowNotifyDialog] = useState(false)
 
   const isInstructor = user?.id === room.instructor_id
   const isGuardian = profile?.role === 'guardian'
@@ -195,6 +196,41 @@ export default function ScheduleTab({ room, members }: Props) {
       queryClient.invalidateQueries({ queryKey: ['lessons_scheduled', room.id] })
       setLocalMySlots(null)
     },
+  })
+
+  // 確定授業一覧（通知メッセージ用）
+  const { data: upcomingLessons = [] } = useQuery({
+    queryKey: ['lessons_upcoming_notify', room.id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('lessons').select('*').eq('room_id', room.id).eq('status', 'scheduled')
+        .gte('scheduled_at', new Date().toISOString()).order('scheduled_at').limit(10)
+      if (error) throw error
+      return data as Lesson[]
+    },
+    enabled: isInstructor,
+  })
+
+  // 授業確定通知送信
+  const { mutate: sendNotification, isPending: isSending } = useMutation({
+    mutationFn: async () => {
+      const days = ['日', '月', '火', '水', '木', '金', '土']
+      const lessonLines = upcomingLessons.map(l => {
+        const d = new Date(l.scheduled_at)
+        const end = new Date(d.getTime() + l.duration_minutes * 60000)
+        return `・${d.getMonth() + 1}/${d.getDate()}(${days[d.getDay()]}) ${minutesToTime(d.getHours() * 60 + d.getMinutes())}〜${minutesToTime(end.getHours() * 60 + end.getMinutes())}`
+      }).join('\n')
+
+      const message = `📅 授業確定のお知らせ\n\n以下の授業が確定しました：\n\n${lessonLines}\n\nアプリからご確認ください。`
+
+      const { data: { session } } = await supabase.auth.getSession()
+      const { error } = await supabase.functions.invoke('line-send', {
+        body: { room_id: room.id, message },
+        headers: { Authorization: `Bearer ${session?.access_token}` },
+      })
+      if (error) throw error
+    },
+    onSuccess: () => setShowNotifyDialog(false),
   })
 
   const changeWeek = (newKey: string) => {
@@ -441,10 +477,55 @@ export default function ScheduleTab({ room, members }: Props) {
             {isSubmitting ? '保存中...' : isDirty ? '予定を提出する' : '提出済み'}
           </button>
         )}
+        {/* 確定通知ボタン（講師のみ） */}
+        {isInstructor && (
+          <button
+            onClick={() => setShowNotifyDialog(true)}
+            disabled={upcomingLessons.length === 0}
+            className="w-full border border-[#52B788] text-[#2D6A4F] font-medium py-2.5 rounded-2xl text-sm transition-colors disabled:opacity-40 flex items-center justify-center gap-2"
+          >
+            <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+            </svg>
+            確定授業を通知する
+          </button>
+        )}
         {isGuardian && (
           <p className="text-center text-xs text-[#9CA3AF]">保護者は閲覧のみです</p>
         )}
       </div>
+
+      {/* 通知確認ダイアログ */}
+      {showNotifyDialog && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-end justify-center px-4 pb-6">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg space-y-4" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-bold text-[#1B1B1B]">授業確定通知</h3>
+            <p className="text-sm text-[#6B7280]">LINE連携済みのメンバーに以下の授業情報を送信します。</p>
+            <div className="bg-[#F7F9F7] rounded-xl p-4 space-y-1">
+              {upcomingLessons.map(l => {
+                const d = new Date(l.scheduled_at)
+                const end = new Date(d.getTime() + l.duration_minutes * 60000)
+                const days = ['日', '月', '火', '水', '木', '金', '土']
+                return (
+                  <p key={l.id} className="text-sm text-[#1B1B1B]">
+                    {`${d.getMonth() + 1}/${d.getDate()}(${days[d.getDay()]}) ${minutesToTime(d.getHours() * 60 + d.getMinutes())}〜${minutesToTime(end.getHours() * 60 + end.getMinutes())}`}
+                  </p>
+                )
+              })}
+            </div>
+            <button
+              onClick={() => sendNotification()}
+              disabled={isSending}
+              className="w-full bg-[#2D6A4F] text-white font-bold py-3 rounded-2xl disabled:opacity-50"
+            >
+              {isSending ? '送信中...' : '送信する'}
+            </button>
+            <button onClick={() => setShowNotifyDialog(false)} className="w-full text-sm text-[#6B7280] py-2">
+              キャンセル
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

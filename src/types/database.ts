@@ -98,12 +98,20 @@ export type Homework = {
   id: string
   room_id: string
   lesson_id: string | null
+  assigned_to: string | null     // 特定生徒への割り当て（null = 全員）
   title: string
   description: string | null
   reference_text: string | null
   due_type: 'lesson' | 'next_lesson' | 'custom' | null
   due_date: string | null        // YYYY-MM-DD（custom時）
   due_lesson_id: string | null   // lesson時: 指定の授業日
+  created_at: string
+}
+
+export type HomeworkCompletion = {
+  id: string
+  homework_id: string
+  learner_id: string
   created_at: string
 }
 

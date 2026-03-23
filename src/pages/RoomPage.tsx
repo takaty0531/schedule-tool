@@ -529,7 +529,7 @@ export default function RoomPage() {
       )}
       {activeTab === 'homework' && (
         <div className="max-w-lg mx-auto">
-          <HomeworkTab room={room} />
+          <HomeworkTab room={room} members={members} />
         </div>
       )}
 
