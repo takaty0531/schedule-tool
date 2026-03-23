@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { Session, User } from '@supabase/supabase-js'
 import { supabase } from './supabase'
+import { getDeviceId } from './pwa'
 import type { Profile } from '../types/database'
 
 type AuthContextType = {
@@ -18,6 +19,31 @@ const AuthContext = createContext<AuthContextType>({
   loading: true,
   refreshProfile: async () => {},
 })
+
+/** DBに保存された待機セッションを取得してログイン（PWA←Safari橋渡し） */
+async function claimPendingSession(): Promise<boolean> {
+  const deviceId = getDeviceId()
+  const { data } = await supabase
+    .from('pending_pwa_sessions')
+    .select('id, access_token, refresh_token')
+    .eq('device_id', deviceId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .single()
+
+  if (!data) return false
+
+  // セッションを設定
+  const { error } = await supabase.auth.setSession({
+    access_token: data.access_token,
+    refresh_token: data.refresh_token,
+  })
+
+  // 使用済みレコードを削除
+  await supabase.from('pending_pwa_sessions').delete().eq('device_id', deviceId)
+
+  return !error
+}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
@@ -47,7 +73,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // トークンが期限切れの場合はリフレッシュを試みる
           const { data: { user }, error } = await supabase.auth.getUser()
           if (error) {
-            // リフレッシュトークンでセッション復元を試行
             const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession()
             if (refreshError || !refreshed.session) {
               await supabase.auth.signOut()
@@ -61,6 +86,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           setSession(session)
           await fetchProfile(user!.id)
+          setLoading(false)
+          return
+        }
+
+        // ローカルセッションなし → Safari経由のLINEログインのセッションを確認
+        const claimed = await claimPendingSession()
+        if (claimed) {
+          // onAuthStateChangeが発火してセッションが設定される
+          // loadingはonAuthStateChangeのハンドラで解除
+          return
         }
       } catch {
         // ネットワークエラー等 → ローカルセッションをそのまま使用
@@ -76,11 +111,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session)
-      if (session?.user) fetchProfile(session.user.id)
-      else setProfile(null)
+      if (session?.user) {
+        fetchProfile(session.user.id).finally(() => setLoading(false))
+      } else {
+        setProfile(null)
+        setLoading(false)
+      }
     })
 
-    return () => subscription.unsubscribe()
+    // アプリがフォアグラウンドに戻った時にも待機セッションを確認
+    const handleVisibility = async () => {
+      if (document.visibilityState === 'visible') {
+        const { data: { session: current } } = await supabase.auth.getSession()
+        if (!current) {
+          await claimPendingSession()
+        }
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+
+    return () => {
+      subscription.unsubscribe()
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
   }, [])
 
   return (

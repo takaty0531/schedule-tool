@@ -1,19 +1,7 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-
-function handleLineLogin() {
-  const state = Math.random().toString(36).substring(2)
-  const redirectUri = `${window.location.origin}/schedule-tool/line-callback`
-  const params = new URLSearchParams({
-    response_type: 'code',
-    client_id: import.meta.env.VITE_LINE_CHANNEL_ID,
-    redirect_uri: redirectUri,
-    state,
-    scope: 'profile openid',
-  })
-  window.location.href = `https://access.line.me/oauth2/v2.1/authorize?${params}`
-}
+import { startLineLogin } from '../lib/pwa'
 
 export default function RegisterPage() {
   const navigate = useNavigate()
@@ -148,7 +136,7 @@ export default function RegisterPage() {
             </div>
             <button
               type="button"
-              onClick={handleLineLogin}
+              onClick={() => startLineLogin()}
               className="mt-4 w-full flex items-center justify-center gap-3 bg-[#06C755] hover:bg-[#05b34c] text-white font-bold py-3 rounded-2xl transition-colors"
             >
               <svg width="22" height="22" viewBox="0 0 48 48" fill="white">
