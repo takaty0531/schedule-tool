@@ -6,6 +6,7 @@ import { useAuth } from '../lib/auth'
 import BottomNav from '../components/BottomNav'
 import Avatar from '../components/Avatar'
 import type { Room, Homework, Lesson } from '../types/database'
+import { resolvedDueDate } from '../lib/homeworkUtils'
 
 type MemberRoomRow = {
   room_id: string
@@ -39,24 +40,6 @@ type LearnerHomeworkStatus = {
 
 function getRoomName(value: LessonRow['rooms']): string {
   return Array.isArray(value) ? value[0]?.name ?? 'ルーム' : value?.name ?? 'ルーム'
-}
-
-// 宿題の実際の期限日時を計算
-function resolvedDueDate(hw: Homework, lessonsMap: Map<string, Lesson>, sortedLessons: Lesson[]): Date | null {
-  if (!hw.due_type) return null
-  if (hw.due_type === 'custom' && hw.due_date) return new Date(hw.due_date + 'T23:59:59')
-  if (hw.due_type === 'lesson' && hw.due_lesson_id) {
-    const l = lessonsMap.get(hw.due_lesson_id)
-    return l ? new Date(l.scheduled_at) : null
-  }
-  if (hw.due_type === 'next_lesson' && hw.lesson_id) {
-    const cur = lessonsMap.get(hw.lesson_id)
-    if (!cur) return null
-    const curTime = new Date(cur.scheduled_at)
-    const next = sortedLessons.find(l => new Date(l.scheduled_at) > curTime)
-    return next ? new Date(next.scheduled_at) : null
-  }
-  return null
 }
 
 function formatTime(iso: string): string {

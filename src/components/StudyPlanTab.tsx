@@ -3,15 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import type { Room, StudyPlanItem, Lesson } from '../types/database'
-import { minutesToTime } from '../lib/scheduleUtils'
+import { lessonLabel } from '../lib/homeworkUtils'
 
 type Props = { room: Room }
-
-function lessonLabel(lesson: Lesson): string {
-  const d = new Date(lesson.scheduled_at)
-  const days = ['日', '月', '火', '水', '木', '金', '土']
-  return `${d.getMonth() + 1}/${d.getDate()}(${days[d.getDay()]}) ${minutesToTime(d.getHours() * 60 + d.getMinutes())}`
-}
 
 // タイトル / サブ項目追加モーダル
 function AddItemModal({ room, subject, lessons, parentItem, onClose }: {
