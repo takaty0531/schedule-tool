@@ -216,6 +216,12 @@ export default function SettingsPage() {
           </div>
         )}
 
+        {/* 利用規約・プライバシーポリシー */}
+        <div className="flex justify-center gap-4">
+          <button onClick={() => navigate('/terms')} className="text-xs text-[#6B7280] underline">利用規約</button>
+          <button onClick={() => navigate('/privacy')} className="text-xs text-[#6B7280] underline">プライバシーポリシー</button>
+        </div>
+
         {/* ログアウト */}
         <button
           onClick={handleLogout}

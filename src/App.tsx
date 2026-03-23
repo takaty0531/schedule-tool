@@ -14,6 +14,8 @@ import RoomRecordsPage from './pages/RoomRecordsPage'
 import LineCallbackPage from './pages/LineCallbackPage'
 import RoleSelectPage from './pages/setup/RoleSelectPage'
 import ProfileSetupPage from './pages/setup/ProfileSetupPage'
+import TermsPage from './pages/TermsPage'
+import PrivacyPage from './pages/PrivacyPage'
 
 const queryClient = new QueryClient()
 
@@ -58,6 +60,8 @@ function AppRoutes() {
       <Route path="/forgot-password" element={<PublicRoute><ForgotPasswordPage /></PublicRoute>} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/settings" element={<ProfileRoute><SettingsPage /></ProfileRoute>} />
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
     </Routes>
   )
 }

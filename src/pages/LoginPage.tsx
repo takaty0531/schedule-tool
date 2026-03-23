@@ -119,6 +119,11 @@ export default function LoginPage() {
               <Link to="/forgot-password" className="text-[#2D6A4F] font-medium">パスワードを忘れた方</Link>
             </p>
           </div>
+
+          <div className="mt-8 flex justify-center gap-4">
+            <Link to="/terms" className="text-xs text-[#9CA3AF] underline">利用規約</Link>
+            <Link to="/privacy" className="text-xs text-[#9CA3AF] underline">プライバシーポリシー</Link>
+          </div>
         </div>
       </div>
     </div>
