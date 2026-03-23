@@ -211,7 +211,19 @@ export default function ScheduleTab({ room, members }: Props) {
     enabled: isInstructor,
   })
 
-  // 授業確定通知送信
+  // 通知テンプレート取得
+  const { data: notifSetting } = useQuery({
+    queryKey: ['notification_settings', room.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('notification_settings').select('lesson_confirmed_template')
+        .eq('room_id', room.id).maybeSingle()
+      return data as { lesson_confirmed_template: string | null } | null
+    },
+    enabled: isInstructor,
+  })
+
+  // 授業確定通知送信（テンプレートベース）
   const { mutate: sendNotification, isPending: isSending } = useMutation({
     mutationFn: async () => {
       const days = ['日', '月', '火', '水', '木', '金', '土']
@@ -221,7 +233,11 @@ export default function ScheduleTab({ room, members }: Props) {
         return `・${d.getMonth() + 1}/${d.getDate()}(${days[d.getDay()]}) ${minutesToTime(d.getHours() * 60 + d.getMinutes())}〜${minutesToTime(end.getHours() * 60 + end.getMinutes())}`
       }).join('\n')
 
-      const message = `📅 授業確定のお知らせ\n\n以下の授業が確定しました：\n\n${lessonLines}\n\nアプリからご確認ください。`
+      const template = notifSetting?.lesson_confirmed_template
+        ?? `📅 授業確定のお知らせ\n\n以下の授業が確定しました：\n\n{授業一覧}\n\nアプリからご確認ください。`
+      const message = template
+        .replaceAll('{授業一覧}', lessonLines)
+        .replaceAll('{ルーム名}', room.name)
 
       const { data: { session } } = await supabase.auth.getSession()
       const { error } = await supabase.functions.invoke('line-send', {

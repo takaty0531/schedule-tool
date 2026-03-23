@@ -782,22 +782,22 @@ export default function HomeworkTab({ room, members }: Props) {
           </p>
         )}
 
-        {/* 未提出セクション */}
+        {/* 提出前セクション */}
         {upcoming.length > 0 && (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-[#1B1B1B]">未提出</span>
+              <span className="text-sm font-bold text-[#1B1B1B]">提出前</span>
               <span className="text-xs bg-[#F7F9F7] text-[#6B7280] px-2 py-0.5 rounded-full">{upcoming.length}</span>
             </div>
             {renderGroups(upcomingGroups, false)}
           </div>
         )}
 
-        {/* 期限超過セクション */}
+        {/* 未提出セクション（期限超過） */}
         {overdue.length > 0 && (
           <div className="space-y-3">
             <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-red-500">期限超過</span>
+              <span className="text-sm font-bold text-red-500">未提出</span>
               <span className="text-xs bg-red-50 text-red-500 px-2 py-0.5 rounded-full">{overdue.length}</span>
             </div>
             {renderGroups(overdueGroups, true)}

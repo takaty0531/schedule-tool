@@ -63,6 +63,19 @@ const PRE_LESSON_VARS = [
   { label: '残り時間', value: '{残り時間}' },
 ]
 
+const DEFAULT_LESSON_CONFIRMED_TEMPLATE = `📅 授業確定のお知らせ
+
+以下の授業が確定しました：
+
+{授業一覧}
+
+アプリからご確認ください。`
+
+const LESSON_CONFIRMED_VARS = [
+  { label: 'ルーム名', value: '{ルーム名}' },
+  { label: '授業一覧', value: '{授業一覧}' },
+]
+
 // トークン生成
 function generateToken() {
   return Math.random().toString(36).substring(2) + Date.now().toString(36)
@@ -209,12 +222,14 @@ export default function RoomPage() {
   const lessonDoneRef = useRef<HTMLTextAreaElement>(null)
   const morningRef = useRef<HTMLTextAreaElement>(null)
   const preLessonRef = useRef<HTMLTextAreaElement>(null)
+  const lessonConfirmedRef = useRef<HTMLTextAreaElement>(null)
   const [lessonDoneText, setLessonDoneText] = useState<string | null>(null)
   const [morningText, setMorningText] = useState<string | null>(null)
   const [preLessonText, setPreLessonText] = useState<string | null>(null)
+  const [lessonConfirmedText, setLessonConfirmedText] = useState<string | null>(null)
   const [templateSaved, setTemplateSaved] = useState(false)
   // 展開中の通知タイプ
-  const [expandedNotif, setExpandedNotif] = useState<'lesson_done' | 'morning' | 'pre_lesson' | null>(null)
+  const [expandedNotif, setExpandedNotif] = useState<'lesson_done' | 'morning' | 'pre_lesson' | 'lesson_confirmed' | null>(null)
 
   // LINE連絡
   const [lineMessage, setLineMessage] = useState('')
@@ -330,6 +345,7 @@ export default function RoomPage() {
         lesson_done_template: string | null
         morning_template: string | null
         pre_lesson_template: string | null
+        lesson_confirmed_template: string | null
       } | null
     },
     enabled: profile?.role === 'instructor',
@@ -358,6 +374,7 @@ export default function RoomPage() {
         lesson_done_template: lessonDoneText ?? notifSetting?.lesson_done_template ?? DEFAULT_LESSON_DONE_TEMPLATE,
         morning_template: morningText ?? notifSetting?.morning_template ?? DEFAULT_MORNING_TEMPLATE,
         pre_lesson_template: preLessonText ?? notifSetting?.pre_lesson_template ?? DEFAULT_PRE_LESSON_TEMPLATE,
+        lesson_confirmed_template: lessonConfirmedText ?? notifSetting?.lesson_confirmed_template ?? DEFAULT_LESSON_CONFIRMED_TEMPLATE,
       }
       if (notifSetting?.id) {
         const { error } = await supabase.from('notification_settings').update(payload).eq('id', notifSetting.id)
@@ -518,6 +535,19 @@ export default function RoomPage() {
       el.setSelectionRange(start + variable.length, start + variable.length)
     })
   }
+  const insertLessonConfirmed = (variable: string) => {
+    const el = lessonConfirmedRef.current
+    if (!el) return
+    const start = el.selectionStart ?? 0
+    const end = el.selectionEnd ?? 0
+    const base = lessonConfirmedText ?? notifSetting?.lesson_confirmed_template ?? DEFAULT_LESSON_CONFIRMED_TEMPLATE
+    const next = base.slice(0, start) + variable + base.slice(end)
+    setLessonConfirmedText(next)
+    requestAnimationFrame(() => {
+      el.focus()
+      el.setSelectionRange(start + variable.length, start + variable.length)
+    })
+  }
 
   return (
     <div className="min-h-svh bg-[#F7F9F7] pb-20">
@@ -577,6 +607,45 @@ export default function RoomPage() {
           <div className="bg-white rounded-2xl overflow-hidden">
             <div className="px-4 pt-4 pb-3 border-b border-gray-100">
               <h2 className="text-sm font-bold text-[#1B1B1B]">定期通知設定</h2>
+            </div>
+
+            {/* 授業確定通知 */}
+            <div className="border-b border-gray-100">
+              <button
+                onClick={() => setExpandedNotif(expandedNotif === 'lesson_confirmed' ? null : 'lesson_confirmed')}
+                className="w-full flex items-center justify-between px-4 py-3.5"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="text-base">📅</span>
+                  <div className="text-left">
+                    <p className="text-sm font-medium text-[#1B1B1B]">授業確定通知</p>
+                    <p className="text-[11px] text-[#9CA3AF]">授業日程が確定した時に送信</p>
+                  </div>
+                </div>
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#9CA3AF" strokeWidth={2} className={`transition-transform ${expandedNotif === 'lesson_confirmed' ? 'rotate-90' : ''}`}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+              {expandedNotif === 'lesson_confirmed' && (
+                <div className="px-4 pb-4 space-y-3">
+                  <div>
+                    <p className="text-xs text-[#6B7280] mb-2">差し込み変数（タップで挿入）</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {LESSON_CONFIRMED_VARS.map(v => (
+                        <button key={v.value} onClick={() => insertLessonConfirmed(v.value)} className="text-xs px-2.5 py-1 rounded-full bg-[#D8F3DC] text-[#2D6A4F] font-medium hover:bg-[#b7e4c7] transition-colors">{v.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                  <textarea
+                    ref={lessonConfirmedRef}
+                    rows={8}
+                    className="w-full border border-gray-200 rounded-xl px-3 py-2.5 text-sm outline-none focus:border-[#52B788] font-mono"
+                    value={lessonConfirmedText ?? notifSetting?.lesson_confirmed_template ?? DEFAULT_LESSON_CONFIRMED_TEMPLATE}
+                    onChange={e => setLessonConfirmedText(e.target.value)}
+                  />
+                  <button onClick={() => setLessonConfirmedText(DEFAULT_LESSON_CONFIRMED_TEMPLATE)} className="text-xs text-[#6B7280] underline">デフォルトに戻す</button>
+                </div>
+              )}
             </div>
 
             {/* 朝の通知 */}

@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/auth'
 import BottomNav from '../components/BottomNav'
 import Avatar from '../components/Avatar'
-import type { Room, Homework } from '../types/database'
+import type { Room, Homework, Lesson } from '../types/database'
 
 type MemberRoomRow = {
   room_id: string
@@ -20,8 +20,43 @@ type LessonRow = {
   rooms: { name: string } | { name: string }[] | null
 }
 
+type UnrecordedLesson = {
+  id: string
+  room_id: string
+  scheduled_at: string
+  roomName: string
+  learnerName: string | null
+}
+
+type LearnerHomeworkStatus = {
+  learnerId: string
+  learnerName: string
+  roomId: string
+  roomName: string
+  overdueCount: number
+  upcomingCount: number
+}
+
 function getRoomName(value: LessonRow['rooms']): string {
   return Array.isArray(value) ? value[0]?.name ?? 'ルーム' : value?.name ?? 'ルーム'
+}
+
+// 宿題の実際の期限日時を計算
+function resolvedDueDate(hw: Homework, lessonsMap: Map<string, Lesson>, sortedLessons: Lesson[]): Date | null {
+  if (!hw.due_type) return null
+  if (hw.due_type === 'custom' && hw.due_date) return new Date(hw.due_date + 'T23:59:59')
+  if (hw.due_type === 'lesson' && hw.due_lesson_id) {
+    const l = lessonsMap.get(hw.due_lesson_id)
+    return l ? new Date(l.scheduled_at) : null
+  }
+  if (hw.due_type === 'next_lesson' && hw.lesson_id) {
+    const cur = lessonsMap.get(hw.lesson_id)
+    if (!cur) return null
+    const curTime = new Date(cur.scheduled_at)
+    const next = sortedLessons.find(l => new Date(l.scheduled_at) > curTime)
+    return next ? new Date(next.scheduled_at) : null
+  }
+  return null
 }
 
 function formatTime(iso: string): string {
@@ -175,40 +210,26 @@ export default function DashboardPage() {
     enabled: !!user,
   })
 
-  // 次回授業（今日以降で最近のもの）
-  const { data: nextLesson } = useQuery({
-    queryKey: ['next_lesson_all', user?.id],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('lessons')
-        .select('id, room_id, scheduled_at, duration_minutes, rooms(name)')
-        .eq('status', 'scheduled')
-        .gt('scheduled_at', new Date().toISOString())
-        .order('scheduled_at')
-        .limit(1)
-        .single()
-      return data as LessonRow | null
-    },
-    enabled: !!user,
-  })
-
-  // 各ルームの次回授業（ルームカード用）
+  // 各ルームの次回授業（ダッシュボード表示 + ルームカード用）
   const { data: nextLessonsMap = {} } = useQuery({
     queryKey: ['next_lessons_dashboard', roomIds.join(',')],
     queryFn: async () => {
       if (roomIds.length === 0) return {}
       const { data } = await supabase
-        .from('lessons').select('id, room_id, scheduled_at')
+        .from('lessons').select('id, room_id, scheduled_at, duration_minutes, rooms(name)')
         .in('room_id', roomIds).eq('status', 'scheduled')
         .gte('scheduled_at', new Date().toISOString()).order('scheduled_at')
-      const map: Record<string, { scheduled_at: string }> = {}
-      data?.forEach(l => { if (!map[l.room_id]) map[l.room_id] = l })
+      const map: Record<string, LessonRow> = {}
+      ;(data ?? []).forEach((l: any) => { if (!map[l.room_id]) map[l.room_id] = l as LessonRow })
       return map
     },
     enabled: roomIds.length > 0,
   })
+  const nextLessonsList = Object.values(nextLessonsMap).sort(
+    (a, b) => new Date(a.scheduled_at).getTime() - new Date(b.scheduled_at).getTime()
+  )
 
-  // 生徒: 未提出の宿題一覧
+  // 生徒: 未完了の宿題一覧（提出前 + 未提出を区別）
   const { data: pendingHomework = [] } = useQuery({
     queryKey: ['pending_homework_dashboard', user?.id, roomIds.join(',')],
     queryFn: async () => {
@@ -229,11 +250,157 @@ export default function DashboardPage() {
         .eq('learner_id', user!.id)
       const completedIds = new Set((completions ?? []).map((c: { homework_id: string }) => c.homework_id))
 
+      // 期限計算用のlessonsデータ取得
+      const { data: lessonsData } = await supabase
+        .from('lessons').select('*').in('room_id', roomIds).order('scheduled_at')
+      const lessonsList = (lessonsData ?? []) as Lesson[]
+      const lMap = new Map(lessonsList.map(l => [l.id, l]))
+
+      const now = new Date()
       return (hwData as (Homework & { rooms: { name: string } | null })[])
         .filter(hw => !completedIds.has(hw.id))
-        .slice(0, 5) // 最大5件
+        .map(hw => {
+          const due = resolvedDueDate(hw, lMap, lessonsList)
+          const isOverdue = due ? due < now : false
+          return { ...hw, dueDate: due, isOverdue }
+        })
+        .sort((a, b) => {
+          // 未提出（期限超過）を先に表示
+          if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1
+          return 0
+        })
+        .slice(0, 8)
     },
     enabled: isLearner && roomIds.length > 0,
+  })
+
+  // 講師: 全ルームのメンバー一覧（未記入記録・宿題状況で共通利用）
+  const { data: allRoomMembers = [] } = useQuery({
+    queryKey: ['all_room_members', roomIds.join(',')],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('room_members')
+        .select('learner_id, display_name, room_id')
+        .in('room_id', roomIds)
+      if (error) throw error
+      return data as { learner_id: string; display_name: string; room_id: string }[]
+    },
+    enabled: isInstructor && roomIds.length > 0,
+  })
+
+  // 講師: 未記入の授業記録
+  const { data: unrecordedLessons = [] } = useQuery({
+    queryKey: ['unrecorded_lessons', user?.id, roomIds.join(',')],
+    queryFn: async () => {
+      const { data: doneLessons } = await supabase
+        .from('lessons')
+        .select('id, room_id, scheduled_at, learner_id, rooms(name)')
+        .in('room_id', roomIds)
+        .eq('status', 'done')
+        .order('scheduled_at', { ascending: false })
+        .limit(50)
+      if (!doneLessons || doneLessons.length === 0) return []
+
+      const { data: records } = await supabase
+        .from('lesson_records')
+        .select('lesson_id')
+        .in('lesson_id', doneLessons.map(l => l.id))
+      const recordedIds = new Set((records ?? []).map((r: { lesson_id: string }) => r.lesson_id))
+
+      return doneLessons
+        .filter(l => !recordedIds.has(l.id))
+        .map(l => ({
+          id: l.id,
+          room_id: l.room_id,
+          scheduled_at: l.scheduled_at,
+          roomName: getRoomName(l.rooms as LessonRow['rooms']),
+          learnerName: allRoomMembers.find(m => m.learner_id === l.learner_id && m.room_id === l.room_id)?.display_name ?? null,
+        }))
+        .slice(0, 5) as UnrecordedLesson[]
+    },
+    enabled: isInstructor && roomIds.length > 0 && allRoomMembers.length >= 0,
+  })
+
+  // 講師: 生徒別の宿題状況（未提出/提出前を区別）
+  const { data: homeworkStatusByLearner = [] } = useQuery({
+    queryKey: ['homework_status_by_learner', user?.id, roomIds.join(',')],
+    queryFn: async () => {
+      const { data: hwData } = await supabase
+        .from('homework')
+        .select('*, rooms(name)')
+        .in('room_id', roomIds)
+      if (!hwData || hwData.length === 0) return []
+
+      const { data: completions } = await supabase
+        .from('homework_completions')
+        .select('homework_id, learner_id')
+        .in('homework_id', hwData.map(h => h.id))
+      const completedSet = new Set((completions ?? []).map((c: { homework_id: string; learner_id: string }) => `${c.homework_id}_${c.learner_id}`))
+
+      // 期限計算用のlessonsデータ
+      const { data: lessonsData } = await supabase
+        .from('lessons').select('*').in('room_id', roomIds).order('scheduled_at')
+      const lessonsList = (lessonsData ?? []) as Lesson[]
+      const lMap = new Map(lessonsList.map(l => [l.id, l]))
+
+      // ルームごとのメンバーマップ
+      const roomMembersMap = new Map<string, { learner_id: string; display_name: string }[]>()
+      allRoomMembers.forEach(m => {
+        if (!roomMembersMap.has(m.room_id)) roomMembersMap.set(m.room_id, [])
+        roomMembersMap.get(m.room_id)!.push(m)
+      })
+
+      const overdueMap = new Map<string, number>()
+      const upcomingMap = new Map<string, number>()
+      const nameMap = new Map<string, string>()
+      const roomNameMap = new Map<string, string>()
+      const now = new Date()
+
+      hwData.forEach((hw: any) => {
+        const rn = Array.isArray(hw.rooms) ? hw.rooms[0]?.name : hw.rooms?.name
+        roomNameMap.set(hw.room_id, rn ?? 'ルーム')
+        const due = resolvedDueDate(hw as Homework, lMap, lessonsList)
+        const isOverdue = due ? due < now : false
+
+        const targets = hw.assigned_to
+          ? (roomMembersMap.get(hw.room_id) ?? []).filter(m => m.learner_id === hw.assigned_to)
+          : (roomMembersMap.get(hw.room_id) ?? [])
+
+        targets.forEach(m => {
+          nameMap.set(m.learner_id, m.display_name)
+          const key = `${hw.room_id}_${m.learner_id}`
+          if (!completedSet.has(`${hw.id}_${m.learner_id}`)) {
+            if (isOverdue) {
+              overdueMap.set(key, (overdueMap.get(key) ?? 0) + 1)
+            } else {
+              upcomingMap.set(key, (upcomingMap.get(key) ?? 0) + 1)
+            }
+          }
+        })
+      })
+
+      const keys = new Set([...overdueMap.keys(), ...upcomingMap.keys()])
+      const result: LearnerHomeworkStatus[] = []
+      keys.forEach(key => {
+        const [roomId, learnerId] = key.split('_')
+        const oc = overdueMap.get(key) ?? 0
+        const uc = upcomingMap.get(key) ?? 0
+        if (oc + uc > 0) {
+          result.push({
+            learnerId,
+            learnerName: nameMap.get(learnerId) ?? '生徒',
+            roomId,
+            roomName: roomNameMap.get(roomId) ?? 'ルーム',
+            overdueCount: oc,
+            upcomingCount: uc,
+          })
+        }
+      })
+      // 未提出が多い順、次に提出前が多い順
+      result.sort((a, b) => b.overdueCount - a.overdueCount || b.upcomingCount - a.upcomingCount)
+      return result
+    },
+    enabled: isInstructor && roomIds.length > 0 && allRoomMembers.length >= 0,
   })
 
   const hasTodayLesson = todayLessons.length > 0
@@ -274,65 +441,169 @@ export default function DashboardPage() {
           </div>
         )}
 
-        {/* 次回授業カード（今日の授業がない場合） */}
-        {!hasTodayLesson && nextLesson && (
-          <button
-            onClick={() => navigate(`/room/${nextLesson.room_id}`)}
-            className="w-full bg-white rounded-2xl p-4 text-left flex items-center gap-4"
-          >
-            <div className="w-12 h-12 bg-[#D8F3DC] rounded-xl flex flex-col items-center justify-center shrink-0">
-              <span className="text-[10px] text-[#2D6A4F] font-medium leading-tight">
-                {new Date(nextLesson.scheduled_at).getMonth() + 1}月
-              </span>
-              <span className="text-xl font-bold text-[#2D6A4F] leading-tight">
-                {new Date(nextLesson.scheduled_at).getDate()}
-              </span>
+        {/* 次回の授業一覧（今日の授業がない場合） */}
+        {!hasTodayLesson && nextLessonsList.length > 0 && (
+          <div className="bg-white rounded-2xl p-4 space-y-3">
+            <p className="text-sm font-bold text-[#1B1B1B]">次回の授業</p>
+            <div className="space-y-2">
+              {nextLessonsList.map(l => (
+                <button
+                  key={l.id}
+                  onClick={() => navigate(`/room/${l.room_id}`)}
+                  className="w-full flex items-center gap-3 text-left"
+                >
+                  <div className="w-10 h-10 bg-[#D8F3DC] rounded-xl flex flex-col items-center justify-center shrink-0">
+                    <span className="text-[9px] text-[#2D6A4F] font-medium leading-tight">
+                      {new Date(l.scheduled_at).getMonth() + 1}月
+                    </span>
+                    <span className="text-base font-bold text-[#2D6A4F] leading-tight">
+                      {new Date(l.scheduled_at).getDate()}
+                    </span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-[#1B1B1B] truncate">{getRoomName(l.rooms)}</p>
+                    <p className="text-xs text-[#52B788]">
+                      {formatDateShort(l.scheduled_at)} {formatTime(l.scheduled_at)}〜
+                    </p>
+                  </div>
+                  <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#D1D5DB" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              ))}
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-xs text-[#6B7280]">次回の授業</p>
-              <p className="font-bold text-[#1B1B1B] text-sm truncate">{getRoomName(nextLesson.rooms)}</p>
-              <p className="text-xs text-[#52B788]">
-                {formatDateShort(nextLesson.scheduled_at)} {formatTime(nextLesson.scheduled_at)}〜
-              </p>
-            </div>
-            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#9CA3AF" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
+          </div>
         )}
 
-        {/* 未提出の宿題（生徒のみ） */}
-        {isLearner && pendingHomework.length > 0 && (
+        {/* 宿題（生徒のみ） */}
+        {isLearner && pendingHomework.length > 0 && (() => {
+          const overdueHw = pendingHomework.filter(hw => hw.isOverdue)
+          const upcomingHw = pendingHomework.filter(hw => !hw.isOverdue)
+          return (
+            <div className="bg-white rounded-2xl p-4 space-y-3">
+              {overdueHw.length > 0 && (
+                <>
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-bold text-red-500">未提出の宿題</p>
+                    <span className="text-xs bg-red-50 text-red-500 px-2 py-0.5 rounded-full font-medium">
+                      {overdueHw.length}件
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {overdueHw.map(hw => {
+                      const roomName = Array.isArray((hw as any).rooms) ? (hw as any).rooms[0]?.name : (hw as any).rooms?.name
+                      return (
+                        <button key={hw.id} onClick={() => navigate(`/room/${hw.room_id}?tab=homework`)} className="w-full flex items-start gap-3 text-left">
+                          <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-red-400" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-[#1B1B1B] truncate">{hw.title}</p>
+                            <p className="text-xs text-[#9CA3AF]">{roomName}</p>
+                          </div>
+                          {hw.dueDate && (
+                            <span className="text-xs font-medium shrink-0 text-red-500">
+                              {formatDateShort(hw.dueDate.toISOString())}まで
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+              {upcomingHw.length > 0 && (
+                <>
+                  <div className={`flex items-center justify-between ${overdueHw.length > 0 ? 'mt-2 pt-2 border-t border-gray-100' : ''}`}>
+                    <p className="text-sm font-bold text-[#1B1B1B]">提出前の宿題</p>
+                    <span className="text-xs bg-[#F7F9F7] text-[#6B7280] px-2 py-0.5 rounded-full font-medium">
+                      {upcomingHw.length}件
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {upcomingHw.map(hw => {
+                      const roomName = Array.isArray((hw as any).rooms) ? (hw as any).rooms[0]?.name : (hw as any).rooms?.name
+                      return (
+                        <button key={hw.id} onClick={() => navigate(`/room/${hw.room_id}?tab=homework`)} className="w-full flex items-start gap-3 text-left">
+                          <div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 bg-gray-300" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-[#1B1B1B] truncate">{hw.title}</p>
+                            <p className="text-xs text-[#9CA3AF]">{roomName}</p>
+                          </div>
+                          {hw.dueDate && (
+                            <span className="text-xs font-medium shrink-0 text-orange-500">
+                              {formatDateShort(hw.dueDate.toISOString())}まで
+                            </span>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        })()}
+
+        {/* 未記入の授業記録（講師のみ） */}
+        {isInstructor && unrecordedLessons.length > 0 && (
           <div className="bg-white rounded-2xl p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-bold text-[#1B1B1B]">未提出の宿題</p>
+              <p className="text-sm font-bold text-[#1B1B1B]">未記入の授業記録</p>
               <span className="text-xs bg-[#FEF9C3] text-[#CA8A04] px-2 py-0.5 rounded-full font-medium">
-                {pendingHomework.length}件
+                {unrecordedLessons.length}件
               </span>
             </div>
             <div className="space-y-2">
-              {pendingHomework.map(hw => {
-                const roomName = Array.isArray((hw as any).rooms)
-                  ? (hw as any).rooms[0]?.name
-                  : (hw as any).rooms?.name
-                const isDueCustom = hw.due_type === 'custom' && hw.due_date
-                const isOverdue = isDueCustom && new Date(hw.due_date + 'T23:59:59') < new Date()
+              {unrecordedLessons.map(l => (
+                <button
+                  key={l.id}
+                  onClick={() => navigate(`/room/${l.room_id}/lesson/${l.id}`)}
+                  className="w-full flex items-center gap-3 text-left"
+                >
+                  <div className="w-1.5 h-1.5 rounded-full shrink-0 bg-[#CA8A04]" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-[#1B1B1B] truncate">{l.roomName}</p>
+                    <p className="text-xs text-[#9CA3AF]">
+                      {formatDateShort(l.scheduled_at)} {formatTime(l.scheduled_at)}〜
+                      {l.learnerName ? ` ・ ${l.learnerName}` : ''}
+                    </p>
+                  </div>
+                  <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#9CA3AF" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 生徒別の宿題状況（講師のみ） */}
+        {isInstructor && homeworkStatusByLearner.length > 0 && (
+          <div className="bg-white rounded-2xl p-4 space-y-3">
+            <p className="text-sm font-bold text-[#1B1B1B]">生徒別の宿題状況</p>
+            <div className="space-y-2">
+              {homeworkStatusByLearner.map(s => {
+                const hasOverdue = s.overdueCount > 0
                 return (
                   <button
-                    key={hw.id}
-                    onClick={() => navigate(`/room/${hw.room_id}?tab=homework`)}
-                    className="w-full flex items-start gap-3 text-left"
+                    key={`${s.roomId}_${s.learnerId}`}
+                    onClick={() => navigate(`/room/${s.roomId}?tab=homework`)}
+                    className="w-full flex items-center gap-3 text-left"
                   >
-                    <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${isOverdue ? 'bg-red-400' : 'bg-[#52B788]'}`} />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-[#1B1B1B] truncate">{hw.title}</p>
-                      <p className="text-xs text-[#9CA3AF]">{roomName}</p>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${hasOverdue ? 'bg-red-50' : 'bg-[#FEF9C3]'}`}>
+                      <span className={`text-xs font-bold ${hasOverdue ? 'text-red-500' : 'text-[#CA8A04]'}`}>{s.overdueCount + s.upcomingCount}</span>
                     </div>
-                    {isDueCustom && (
-                      <span className={`text-xs font-medium shrink-0 ${isOverdue ? 'text-red-500' : 'text-orange-500'}`}>
-                        {formatDateShort(hw.due_date! + 'T00:00:00')}まで
-                      </span>
-                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-[#1B1B1B] truncate">{s.learnerName}</p>
+                      <p className="text-xs text-[#9CA3AF]">{s.roomName}</p>
+                    </div>
+                    <div className="flex flex-col items-end shrink-0 gap-0.5">
+                      {hasOverdue && (
+                        <span className="text-xs text-red-500 font-medium">未提出{s.overdueCount}件</span>
+                      )}
+                      {s.upcomingCount > 0 && (
+                        <span className="text-xs text-[#6B7280] font-medium">提出前{s.upcomingCount}件</span>
+                      )}
+                    </div>
                   </button>
                 )
               })}
