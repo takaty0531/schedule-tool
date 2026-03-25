@@ -83,13 +83,25 @@ Deno.serve(async (req) => {
     })
   }
 
-  // 受信者を取得（user_ids 指定があればそれを使用）
+  // 受信者を取得（生徒 + 保護者、user_ids 指定があればフィルタ）
   const { data: members } = await supabase
     .from('room_members')
     .select('learner_id')
     .eq('room_id', room_id)
 
-  const allMemberIds = members?.map((m: { learner_id: string }) => m.learner_id) ?? []
+  const learnerIds = members?.map((m: { learner_id: string }) => m.learner_id) ?? []
+
+  // 保護者IDを取得（生徒に紐づく保護者）
+  const { data: guardians } = learnerIds.length > 0
+    ? await supabase
+        .from('guardian_learner')
+        .select('guardian_id')
+        .in('learner_id', learnerIds)
+    : { data: [] }
+
+  const guardianIds = guardians?.map((g: { guardian_id: string }) => g.guardian_id) ?? []
+  const allMemberIds = [...new Set([...learnerIds, ...guardianIds])]
+
   const targetIds = Array.isArray(user_ids) && user_ids.length > 0
     ? allMemberIds.filter((id: string) => user_ids.includes(id))
     : allMemberIds

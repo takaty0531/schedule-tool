@@ -76,9 +76,9 @@ const LESSON_CONFIRMED_VARS = [
   { label: '授業一覧', value: '{授業一覧}' },
 ]
 
-// トークン生成
+// トークン生成（暗号学的に安全）
 function generateToken() {
-  return Math.random().toString(36).substring(2) + Date.now().toString(36)
+  return crypto.randomUUID()
 }
 
 // 招待モーダル
@@ -167,26 +167,30 @@ function InviteModal({ room, members, onClose }: { room: Room; members: (RoomMem
               />
             </div>
 
-            {/* 保護者の場合: 紐づく生徒を選択 */}
-            {role === 'guardian' && members.length > 0 && (
-              <div>
-                <label className="block text-sm font-medium text-[#1B1B1B] mb-1">紐づく生徒</label>
-                <select
-                  value={linkedLearnerId}
-                  onChange={e => setLinkedLearnerId(e.target.value)}
-                  className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788]"
-                >
-                  <option value="">選択してください</option>
-                  {members.map(m => (
-                    <option key={m.learner_id} value={m.learner_id}>{m.display_name}</option>
-                  ))}
-                </select>
-              </div>
+            {/* 保護者の場合: 紐づく生徒を選択（必須） */}
+            {role === 'guardian' && (
+              members.filter(m => m.profile?.role !== 'guardian').length > 0 ? (
+                <div>
+                  <label className="block text-sm font-medium text-[#1B1B1B] mb-1">紐づく生徒 <span className="text-red-500">*</span></label>
+                  <select
+                    value={linkedLearnerId}
+                    onChange={e => setLinkedLearnerId(e.target.value)}
+                    className="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-[#52B788]"
+                  >
+                    <option value="">選択してください</option>
+                    {members.filter(m => m.profile?.role !== 'guardian').map(m => (
+                      <option key={m.learner_id} value={m.learner_id}>{m.display_name}</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <p className="text-sm text-red-500">先に生徒を招待してください</p>
+              )
             )}
 
             <button
               onClick={() => mutate()}
-              disabled={!displayName.trim() || isPending}
+              disabled={!displayName.trim() || isPending || (role === 'guardian' && !linkedLearnerId)}
               className="w-full bg-[#2D6A4F] hover:bg-[#245c43] text-white font-bold py-3 rounded-2xl transition-colors disabled:opacity-50"
             >
               {isPending ? '生成中...' : '招待リンクを生成'}
@@ -290,6 +294,31 @@ export default function RoomPage() {
       return data as (RoomMember & { profile: Profile })[]
     },
   })
+
+  // 保護者-生徒の紐付け情報
+  const { data: guardianLinks = [] } = useQuery({
+    queryKey: ['guardian_learner', id],
+    queryFn: async () => {
+      const guardianIds = members.filter(m => m.profile?.role === 'guardian').map(m => m.learner_id)
+      if (guardianIds.length === 0) return []
+      const { data, error } = await supabase
+        .from('guardian_learner')
+        .select('guardian_id, learner_id')
+        .in('guardian_id', guardianIds)
+      if (error) throw error
+      return data as { guardian_id: string; learner_id: string }[]
+    },
+    enabled: members.some(m => m.profile?.role === 'guardian'),
+  })
+
+  // 保護者IDから紐づく生徒名を取得するヘルパー
+  const getLinkedLearnerName = (guardianId: string) => {
+    const links = guardianLinks.filter(gl => gl.guardian_id === guardianId)
+    return links
+      .map(gl => members.find(m => m.learner_id === gl.learner_id)?.display_name)
+      .filter(Boolean)
+      .join(', ')
+  }
 
   // LINE連携済みメンバー計算（members取得後に定義）
   const lineMembers = members.filter(m => m.profile?.line_user_id)
@@ -890,7 +919,12 @@ export default function RoomPage() {
                       )}
                     </div>
                     <span className="text-sm font-medium text-[#1B1B1B] flex-1">{m.display_name}</span>
-                    <span className="text-xs text-[#6B7280]">{roleLabel}</span>
+                    <span className="text-xs text-[#6B7280]">
+                      {roleLabel}
+                      {m.profile?.role === 'guardian' && getLinkedLearnerName(m.learner_id) && (
+                        <span className="ml-0.5 text-[#52B788]">（{getLinkedLearnerName(m.learner_id)}）</span>
+                      )}
+                    </span>
                     {hasLine ? (
                       <span className="text-[10px] text-[#06C755] font-medium">LINE済</span>
                     ) : (
@@ -1167,7 +1201,12 @@ export default function RoomPage() {
                       <Avatar avatarUrl={m.profile.avatar_url} displayName={m.display_name} size={40} />
                       <div className="flex-1">
                         <p className="font-medium text-[#1B1B1B]">{m.display_name}</p>
-                        <p className="text-xs text-[#6B7280]">{m.profile?.role === 'guardian' ? '保護者' : '生徒'}</p>
+                        <p className="text-xs text-[#6B7280]">
+                          {m.profile?.role === 'guardian' ? '保護者' : '生徒'}
+                          {m.profile?.role === 'guardian' && getLinkedLearnerName(m.learner_id) && (
+                            <span className="ml-1 text-[#52B788]">（{getLinkedLearnerName(m.learner_id)}）</span>
+                          )}
+                        </p>
                       </div>
                       <span className="w-3 h-3 rounded-full" style={{ background: COLORS[ci] }} />
                       {profile?.role === 'instructor' && (

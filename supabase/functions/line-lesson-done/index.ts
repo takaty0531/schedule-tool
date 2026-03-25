@@ -157,18 +157,29 @@ Deno.serve(async (req) => {
     message = message.replaceAll(key, value)
   }
 
-  // room_members へ送信
+  // 生徒 + 保護者へ送信
   const { data: members } = await supabase
     .from('room_members')
     .select('learner_id')
     .eq('room_id', room_id)
 
-  const memberIds = members?.map((m: { learner_id: string }) => m.learner_id) ?? []
+  const learnerIds = members?.map((m: { learner_id: string }) => m.learner_id) ?? []
+
+  // 保護者IDを取得（生徒に紐づく保護者）
+  const { data: guardians } = learnerIds.length > 0
+    ? await supabase
+        .from('guardian_learner')
+        .select('guardian_id')
+        .in('learner_id', learnerIds)
+    : { data: [] }
+
+  const guardianIds = guardians?.map((g: { guardian_id: string }) => g.guardian_id) ?? []
+  const allRecipientIds = [...new Set([...learnerIds, ...guardianIds])]
 
   const { data: recipients } = await supabase
     .from('profiles')
     .select('line_user_id')
-    .in('id', memberIds)
+    .in('id', allRecipientIds)
     .not('line_user_id', 'is', null)
 
   let sentCount = 0

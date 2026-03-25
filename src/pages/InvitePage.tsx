@@ -9,10 +9,10 @@ type InvitationWithRoom = Invitation & { rooms: Room }
 export default function InvitePage() {
   const { token } = useParams<{ token: string }>()
   const navigate = useNavigate()
-  const { session, loading: authLoading } = useAuth()
+  const { session, profile, loading: authLoading } = useAuth()
   const [invitation, setInvitation] = useState<Invitation | null>(null)
   const [room, setRoom] = useState<Room | null>(null)
-  const [status, setStatus] = useState<'loading' | 'valid' | 'invalid' | 'joining' | 'done'>('loading')
+  const [status, setStatus] = useState<'loading' | 'valid' | 'invalid' | 'joining' | 'done' | 'role_mismatch'>('loading')
 
   useEffect(() => {
     const fetchInvitation = async () => {
@@ -23,7 +23,8 @@ export default function InvitePage() {
         .single()
 
       if (error || !data) { setStatus('invalid'); return }
-      if (data.status === 'accepted') { setStatus('invalid'); return }
+      // 生徒招待は使い切り、保護者招待は複数人利用可能
+      if (data.status === 'accepted' && data.role === 'learner') { setStatus('invalid'); return }
       if (new Date(data.expires_at) < new Date()) { setStatus('invalid'); return }
 
       const row = data as InvitationWithRoom
@@ -38,6 +39,10 @@ export default function InvitePage() {
     if (!invitation || !session) return
     // 期限切れの再チェック
     if (new Date(invitation.expires_at) < new Date()) { setStatus('invalid'); return }
+    // ロール整合性チェック（講師は生徒/保護者招待を受けられない）
+    if (profile?.role === 'instructor') { setStatus('role_mismatch'); return }
+    if (invitation.role === 'learner' && profile?.role === 'guardian') { setStatus('role_mismatch'); return }
+    if (invitation.role === 'guardian' && profile?.role === 'learner') { setStatus('role_mismatch'); return }
     setStatus('joining')
 
     // room_membersに登録（生徒・保護者共通）
@@ -65,8 +70,10 @@ export default function InvitePage() {
       }
     }
 
-    // 招待をacceptedに更新
-    await supabase.from('invitations').update({ status: 'accepted' }).eq('id', invitation.id)
+    // 生徒招待は1回使い切り、保護者招待は複数人利用可能
+    if (invitation.role === 'learner') {
+      await supabase.from('invitations').update({ status: 'accepted' }).eq('id', invitation.id)
+    }
 
     setStatus('done')
     setTimeout(() => navigate(`/room/${invitation.room_id}`), 1500)
@@ -85,6 +92,16 @@ export default function InvitePage() {
       <div className="min-h-svh flex flex-col items-center justify-center bg-[#F7F9F7] px-6 text-center">
         <h2 className="text-xl font-bold text-[#1B1B1B]">招待リンクが無効です</h2>
         <p className="text-sm text-[#6B7280] mt-2">有効期限切れまたは使用済みです</p>
+      </div>
+    )
+  }
+
+  if (status === 'role_mismatch') {
+    const expected = invitation?.role === 'learner' ? '生徒' : '保護者'
+    return (
+      <div className="min-h-svh flex flex-col items-center justify-center bg-[#F7F9F7] px-6 text-center">
+        <h2 className="text-xl font-bold text-[#1B1B1B]">参加できません</h2>
+        <p className="text-sm text-[#6B7280] mt-2">この招待は{expected}向けです。{expected}アカウントでログインしてください。</p>
       </div>
     )
   }
