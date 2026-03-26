@@ -190,11 +190,22 @@ export default function ScheduleTab({ room, members }: Props) {
         }
       }
     },
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ['slots', room.id, weekKey] })
       queryClient.invalidateQueries({ queryKey: ['lessons', room.id, 'all'] })
       queryClient.invalidateQueries({ queryKey: ['lessons_scheduled', room.id] })
       setLocalMySlots(null)
+
+      // 生徒が提出した場合、講師にLINE通知を送る
+      if (!isInstructor) {
+        const displayName = profile?.display_name ?? '生徒'
+        await supabase.functions.invoke('line-notify-instructor', {
+          body: {
+            room_id: room.id,
+            message: `📅 ${displayName}さんが${room.name}の予定を提出しました。スケジュールタブを確認してください。`,
+          },
+        }).catch(() => {})
+      }
     },
   })
 
